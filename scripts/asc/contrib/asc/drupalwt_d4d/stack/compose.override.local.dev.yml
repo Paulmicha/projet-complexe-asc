@@ -1,0 +1,42 @@
+version: "3"
+services:
+
+  # TODO [evol] Allocate port 80 to Varnish by default if enabled ?
+  # varnish:
+  #   ports:
+  #     - "6081:6081"
+
+  # TODO [evol] Allocate port 6081 to Nginx by default if Varnish is enabled ?
+  nginx:
+    ports:
+      - "80:80"
+
+  php:
+    environment:
+      PHP_SENDMAIL_PATH: /usr/sbin/sendmail -t -i -S mailhog:1025
+
+  # See https://github.com/wodby/adminer
+  adminer:
+    image: wodby/adminer:$ADMINER_TAG
+    container_name: "${STACK_VERSION}_adminer"
+    environment:
+      ADMINER_DEFAULT_DB_DRIVER: $DB_DRIVER
+      ADMINER_DEFAULT_DB_HOST: $DB_HOST
+      ADMINER_DEFAULT_DB_NAME: $DB_NAME
+    ports:
+      - "9000:9000"
+
+  mailhog:
+    image: mailhog/mailhog
+    container_name: "${STACK_VERSION}_mailhog"
+    ports:
+      - "8025:8025" # HTTP (UI)
+      # - "1025:1025" # SMTP (no exposition needed)
+
+  # solr:
+  #   ports:
+  #     - "8983:8983"
+
+  # tika:
+  #   ports:
+  #     - "9998:9998"

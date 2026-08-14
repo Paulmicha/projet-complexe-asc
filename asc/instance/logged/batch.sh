@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+##
+# Logged batch composition: log/wrap → thread/batch.
+#
+# @example
+#   # Manually hardcoded shortcut :
+#   # @see ASC_SYNONYMS in asc/env/global.vars.sh
+#   make lb e:blueprint-generate e:transcribe-all
+#   # Equivalent to :
+#   make logged-batch e:blueprint-generate e:transcribe-all
+#   # Or :
+#   asc/instance/logged/batch.sh e:blueprint-generate e:transcribe-all
+#
+
+. asc/bootstrap.sh
+
+logged_batch_variants='STACK_VERSION PROVISION_USING HOST_OS'
+
+hook -s 'log' -p 'pre' -a 'logged_batch' -v "$logged_batch_variants"
+hook -s 'batch' -p 'pre' -a 'logged_batch' -v "$logged_batch_variants"
+
+asc/log/log.wrap.sh asc/thread/batch.sh "$@"
+
+hook -s 'log' -p 'post' -a 'logged_batch' -v "$logged_batch_variants"
+hook -s 'batch' -p 'post' -a 'logged_batch' -v "$logged_batch_variants"

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+##
+# Download DB dump(s) from remote.
+#
+# @see asc/extensions/remote_db/remote/db_dump.sh
+# @see data/asc/remote-instances/${a_remote_id}.sh
+# @see f_remote_instances_setup() in asc/extensions/remote/remote.inc.sh
+#
+# @param 1 [optional] String : remote host ID.
+#   Defaults to 'prod'.
+# @param 2 [optional] String : remote DB id.
+#   Defaults to '', meaning : download all DB IDs defined in the remote.
+# @param 3 [optional] String : remote DB dump file path (relative to the
+#   REMOTE_INSTANCE_DOCROOT, but absolute paths work too).
+#
+# @example
+#   # Fetch most recent remote DB dump from all DB IDs on remote 'prod' :
+#   make remote-db-download 'prod'
+#   # Or :
+#   asc/extensions/remote_db/remote/db_download.sh 'prod'
+#
+#   # Fetch a specific remote DB dump file :
+#   make remote-db-download 'prod_api' 'api' data/db-dumps/local/api/2024-08-07.15-34-23_api_foobar.localhost.sql.gz
+#   # Or :
+#   asc/extensions/remote_db/remote/db_download.sh 'prod_api' 'api' data/db-dumps/local/api/2024-08-07.15-34-23_api_foobar.localhost.sql.gz
+#
+
+. asc/bootstrap.sh
+
+remote_id="$1"
+db_id="$2"
+remote_file="$3"
+
+if [[ -z "$remote_id" ]]; then
+  remote_id='prod'
+fi
+
+f_remote_check_id "$remote_id"
+
+echo "Downloading DB dumps from remote instance '$remote_id' ..."
+
+declare -A dumps_dict
+
+f_remote_db_prepare_downloads "$remote_id" "$db_id" "$remote_file"
+
+db_id=''
+db_ids_arr=()
+cmds_arr=()
+
+f_db_get_ids
+
+for db_id in "${db_ids_arr[@]}"; do
+  if [[ -z "${dumps_dict["${db_id}.remote_dump_file_path"]}" ]] \
+    || [[ -z "${dumps_dict["${db_id}.local_dump_dir"]}" ]]
+  then
+    continue
+  fi
+
+  # Debug.
+  # echo "remote_dump_dir = ${dumps_dict["${db_id}.remote_dump_dir"]}"
+  # echo "local_dump_dir = ${dumps_dict["${db_id}.local_dump_dir"]}"
+  # echo "remote_dump_file_path = ${dumps_dict["${db_id}.remote_dump_file_path"]}"
+  # echo "local_dump_file_path = ${dumps_dict["${db_id}.local_dump_file_path"]}"
+
+  # The use of symlinks always results in the same file name here
+  # -> only skip re-downloading if NOT using the symlink.
+  if [[ "$ASC_REMOTE_DB_SYMLINK_DL" != 'yes' && -f "${dumps_dict[${db_id}.local_dump_file_path]}" ]]; then
+    echo "  File already exists :"
+    echo "    ${dumps_dict[${db_id}.local_dump_file_path]}"
+    echo "    -> skip re-downloading."
+    continue
+  fi
+
+  # Make sure the local dir exists.
+  mkdir -p "${dumps_dict["${db_id}.local_dump_dir"]}"
+
+  # Debug.
+  # echo "u_remote_download $remote_id ${dumps_dict["${db_id}.remote_dump_file_path"]} ${dumps_dict["${db_id}.local_dump_dir"]}/"
+
+  f_remote_download "$remote_id" \
+    "${dumps_dict[${db_id}.remote_dump_file_path]}" \
+    "${dumps_dict[${db_id}.local_dump_dir]}/"
+
+  if [[ ! -f "${dumps_dict[${db_id}.local_dump_file_path]}" ]]; then
+    echo >&2
+    echo "Error in $BASH_SOURCE line $LINENO: failed to fetch remote dump file." >&2
+    echo >&2
+    exit 1
+  fi
+done
+
+echo "Downloading DB dumps from remote instance '$remote_id' : done."
+echo

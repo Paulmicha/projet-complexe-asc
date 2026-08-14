@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+##
+# TODO [wip] te re-test.
+# ASC remote ssh key auth action.
+#
+# @param 1 String : the remote ID.
+# @param 2 [optional] String : the SSH public key file path.
+#   Defaults to "$HOME/.ssh/id_rsa.pub" or "$ASC_SSH_PUBKEY" if not empty.
+#
+# @example
+#   make remote-ssh-key-auth 'my_short_id'
+#   # Or :
+#   asc/extensions/remote/remote/ssh_key_auth.sh 'my_short_id'
+#
+
+. asc/bootstrap.sh
+
+a_id="$1"
+a_key="$2"
+
+f_remote_check_id "$a_id"
+
+public_key_path="$HOME/.ssh/id_rsa.pub"
+
+if [[ -n "$ASC_SSH_PUBKEY" ]]; then
+  public_key_path="$ASC_SSH_PUBKEY"
+fi
+
+if [[ -n "$a_key" ]]; then
+  public_key_path="$a_key"
+fi
+
+f_remote_instance_load "$a_id"
+
+if [[ -z "$REMOTE_INSTANCE_SSH_CONNECT_CMD" ]]; then
+  echo >&2
+  echo "Error in $BASH_SOURCE line $LINENO: no conf found for remote id '$a_id'." >&2
+  echo "-> Aborting (1)." >&2
+  echo >&2
+  exit 1
+fi
+
+# Current $USER must already have a public key.
+if [[ ! -f "$public_key_path" ]]; then
+  echo >&2
+  echo "Error in $BASH_SOURCE line $LINENO: the public key '$public_key_path' was not found." >&2
+  echo "E.g. generate with command : ssh-keygen -t rsa" >&2
+  echo "-> Aborting (2)." >&2
+  echo >&2
+  exit 2
+fi
+
+# Ensures SSH agent is running with the key loaded.
+if [[ -z "$SSH_AUTH_SOCK" ]]; then
+  echo "SSH agent is not running (or not detected in $BASH_SOURCE line $LINENO)"
+  echo "-> Launching ssh-agent and load the key in current terminal session..."
+  echo "Note : if a passphrase was used to generate the key, this will prompt for it."
+
+  eval `ssh-agent -s`
+  ssh-add "$public_key_path"
+
+  if [[ $? -ne 0 ]]; then
+    echo >&2
+    echo "Error in $BASH_SOURCE line $LINENO: the command 'ssh-add' exited with a non-zero status." >&2
+    echo "-> Aborting (3)." >&2
+    echo >&2
+    exit 3
+  else
+    echo "Launching ssh-agent and load the key in current terminal session : done."
+  fi
+fi
+
+echo
+echo "Sending our local key to the remote server 'authorized_keys' file ..."
+
+ssh-copy-id -i "$public_key_path" "$REMOTE_INSTANCE_HOST"
+
+echo "Sending our local key to the remote server 'authorized_keys' file : done."
+echo

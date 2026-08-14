@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+##
+# Global (env) vars for the 'remote' ASC extension.
+#
+# This file is used during "instance init" to generate the global environment
+# variables specific to current project instance.
+#
+# @see f_instance_init() in asc/instance/instance.inc.sh
+# @see asc/utilities/global.sh
+# @see asc/bootstrap.sh
+#
+
+# ASC_REMOTE_FILES_SUFFIXES is used to build other variables, like :
+# - REMOTE_INSTANCE_FILES_PUBLIC
+# - REMOTE_INSTANCE_FILES_PRIVATE
+# - etc.
+# @see f_remote_instances_setup() in asc/extensions/remote/remote.inc.sh
+
+# This allows to have more control over the files to sync, without being tied to
+# any specific implementation dealing with a particular app (e.g. Drupal,
+# see the 'drupalwt' extension, i.e. sites/default/files_arr).
+# This is about remote interactions, which may not map well with the other
+# "configurations".
+
+# It can be overriden entirely, or more suffixes can be added like :
+# $ global ASC_REMOTE_FILES_SUFFIXES "[append]=foobar"
+# @see f_remote_definition_get_keys() in asc/extensions/remote/remote.inc.sh
+# @see asc/extensions/remote/remote/files_dir_sync_from.sh
+
+global ASC_REMOTE_FILES_SUFFIXES "[default]='public private'"
+
+
+# TODO [wip] reevaluate and document where it is used. Currently :
+# @see asc/extensions/remote/remote/ssh_key_auth.sh
+# Default path to the SSH public key to use for remote connections. This can be
+# overridden per remote instance using the YAML file hook: remote_instances.yml
+# @see f_remote_instances_setup() in asc/extensions/remote/remote.inc.sh
+
+global ASC_SSH_PUBKEY "[default]=$HOME/.ssh/id_rsa.pub"
+
+global ASC_SYNONYMS "[append]='remote-dependency/remote-dep'"

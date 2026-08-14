@@ -1,0 +1,16 @@
+{
+  "files.exclude": {
+    "app": false,
+    "**/.git": false
+  },
+  "files.watcherExclude": {
+    "app": true,
+    "data": true,
+    ".git/objects": true
+  },
+  "search.exclude": {
+    "app": false,
+    "data/db-dumps": true,
+    ".git/objects": true
+  }
+}

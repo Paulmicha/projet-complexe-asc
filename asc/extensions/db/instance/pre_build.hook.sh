@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+##
+# Implements hook -s 'instance' -p 'pre' -a 'build' -v 'STACK_VERSION PROVISION_USING HOST_TYPE INSTANCE_TYPE'
+#
+# Makes sure DB-related env. vars. get exported for extensions which need them
+# during this action - e.g. docker-compose.
+#
+# @see asc/instance/build.sh
+# @see asc/extensions/compose/instance/build.compose.hook.sh
+#
+
+f_db_set_all

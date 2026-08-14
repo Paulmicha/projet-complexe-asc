@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+##
+# Drupal-related global (env) vars for instances using docker-compose.
+#
+# Convention : variables suffixed with *_C are containers paths used in
+# docker-compose.yml file.
+#
+# This file is used during "instance init" to generate the global environment
+# variables specific to current project instance.
+#
+# @see f_instance_init() in asc/instance/instance.inc.sh
+# @see asc/utilities/global.sh
+# @see asc/bootstrap.sh
+#
+
+global APP_DOCROOT_C "[default]=/var/www/html"
+global SERVER_DOCROOT_C "[if-SERVER_DOCROOT]='$APP_DOCROOT/docroot' [true]=/var/www/html/docroot [false]=/var/www/html/web"
+
+global DRUPAL_FILES_DIR_C "[default]=$SERVER_DOCROOT_C/sites/default/files"
+global DRUPAL_TMP_DIR_C "[default]='/mnt/files/tmp'"
+# global DRUPAL_TRANSLATION_DIR_C "[default]=$SERVER_DOCROOT_C/sites/default/files/translations"
+global DRUPAL_PRIVATE_DIR_C "[default]='/mnt/files/private'"
+global DRUPAL_CONFIG_SYNC_DIR_C "[default]=$APP_DOCROOT_C/config/sync"
+
+global REDIS_CLIENT_HOST "[value]=${REDIS_SNAME:=redis} [index]=1"

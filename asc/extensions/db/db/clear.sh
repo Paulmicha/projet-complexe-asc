@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+##
+# [abstract] Clears (empties) database.
+#
+# @param 1 [optional] String : the database ID ($DB_ID), see f_db_set().
+#   Defaults to 'default'.
+# @param 2 [optional] String : force reload flag (bypasses optimization) if the
+#   DB credentials vars are already exported in current shell scope.
+#   TODO deprecate this argument and export a specific variable instead.
+#
+# This script provides an entry point for triggering a specific hook. "Abstract"
+# means that this extension doesn't provide any actual implementation for this
+# functionality. In order for this script to have any effect, it is necessary
+# to use an extension that does. E.g. :
+#
+# @see asc/extensions/mysql
+# @see asc/extensions/pgsql
+#
+# @example
+#   make db-clear
+#   make db-clear 'custom_db_id'
+#   # Or :
+#   asc/extensions/db/db/clear.sh
+#   asc/extensions/db/db/clear.sh 'custom_db_id'
+#
+
+. asc/bootstrap.sh
+
+# @see asc/extensions/db/db.inc.sh
+f_db_clear $@

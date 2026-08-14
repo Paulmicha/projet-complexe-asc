@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+
+##
+# Switches current project instance type.
+#
+# @param 1 String : the new instance type.
+#
+# @example
+#   make switch-type 'dev'
+#   make rebuild
+#   # Or :
+#   asc/instance/switch_type.sh 'dev'
+#   asc/instance/rebuild.sh
+#
+
+# Force the new instance type value alone.
+INSTANCE_TYPE="$1"
+
+# Can't have read-only variables here, so we need to extract just the
+# variables we need.
+# TODO support all globals for reinits ? For ex. as in :
+# @see f_traefik_generate_acme_conf() in asc/extensions/remote_traefik/remote_traefik.inc.sh
+# -> here, we could just pass a custom option that would instruct the
+# f_instance_init() function to dynamically get all existing values ?
+if [[ -f '.env' ]]; then
+  while IFS= read -r line _; do
+    case "$line" in
+      'HOST_TYPE='*)
+        eval "$line"
+        ;;
+      'PROVISION_USING='*)
+        eval "$line"
+        ;;
+      'ASC_SSH_PUBKEY='*)
+        eval "$line"
+        ;;
+    esac
+  done < '.env'
+fi
+
+# Remove all previously initialized values.
+. asc/instance/uninit.sh
+
+# TODO [wip] refactoring : check what we really need to keep.
+# @see asc/instance/reinit.sh
+# Wipe out env vars to avoid pile-ups for 'append' type globals during reinit.
+# See https://unix.stackexchange.com/a/49057
+# Except individual public key path for ASC remote instances operations.
+# @see scripts/asc/extend/remote/post_init.hook.sh
+# Also except ASC_DB_ID for the db extension.
+# @see f_db_set() in asc/extensions/db/db.inc.sh
+# Also except common shell env vars some programs use.
+env -i \
+  ASC_SSH_PUBKEY="$ASC_SSH_PUBKEY" \
+  ASC_APPS="$ASC_APPS" \
+  ASC_DB_ID="$ASC_DB_ID" \
+  HOME="$HOME" LC_CTYPE="${LC_ALL:-${LC_CTYPE:-$LANG}}" PATH="$PATH" USER="$USER" \
+  asc/instance/init.sh \
+    -t "$INSTANCE_TYPE" \
+    -h "$HOST_TYPE" \
+    -p "$PROVISION_USING" \
+    -y
