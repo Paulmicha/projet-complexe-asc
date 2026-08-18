@@ -1,8 +1,9 @@
 # Graph RAG, Wikipedia / DBpedia, and IEML
 
 - **Date:** 2026-08-18
+- **Updated:** 2026-08-18 — FR/EN/pt-BR dumps; Wikipedia as offline third-party source (not Arango); glossary for LOD and QID; multi-provider LLM handoff vs implicit semantics
 - **Status:** idea / architecture note (not a spec, not an implementation plan)
-- **Scope:** what Graph RAG is and why it exists; whether a local English Wikipedia + DBpedia copy is worth it; whether IEML adds anything beside graphs, dumps, and LLMs; mermaid translations of the 2009–2014 entity diagrams
+- **Scope:** what Graph RAG is and why it exists; whether a local Wikipedia + DBpedia copy in French, English, and Portuguese is worth it as an offline source; whether IEML adds anything beside graphs, dumps, and LLMs; mermaid translations of the 2009–2014 entity diagrams
 - **Related:**
   - [14-proposed-architecture.md](14-proposed-architecture.md) — ASC control plane, conceptual graph, LOD / performance governor
   - [17-local-dev-stack-architecture.md](17-local-dev-stack-architecture.md) — extract-once, Solr + pgvector + Arango, paging, cost cliffs
@@ -26,7 +27,7 @@ The remaining question is how three *external* knowledge technologies sit on tha
 | Technology | What it is, in one line | Layer it would occupy |
 |---|---|---|
 | **Graph RAG** | Build a graph from *your* texts, then retrieve a *bounded subgraph* (or a community summary) instead of the nearest embedding chunks | Indexer / query strategy over the personal corpus |
-| **Wikipedia articles + DBpedia triples (en)** | A frozen public encyclopedia: prose for evidence, RDF for typed facts | Optional *grounding* corpus, not the second brain |
+| **Wikipedia articles + DBpedia triples (fr, en, pt)** | A frozen public encyclopedia on disk: prose and/or RDF, consulted when the home link is down | Optional *offline third-party source*, not the second brain and not an Arango load |
 | **IEML** | A constructed language whose *form* is meant to be semantically computable (syntagmatic *and* paradigmatic) | Optional *coordinate system* for concepts, if ever derived |
 
 They are complementary only if each one is used for the job the others cannot do. Mixing them into one “knowledge graph product” is how the project would freeze a bad ontology.
@@ -51,9 +52,9 @@ flowchart TB
     GRAG["Graph RAG<br/>local neighbourhood / community"]
   end
 
-  subgraph public["Optional public grounding"]
-    WP["Wikipedia en articles"]
-    DBO["DBpedia / Wikidata triples"]
+  subgraph public["Offline third-party source (not Arango)"]
+    WP["Wikipedia dumps / Kiwix<br/>fr + en + pt"]
+    DBO["DBpedia dump files<br/>fr + en + pt chapters"]
   end
 
   subgraph meaning["Meaning, only when persistence matters"]
@@ -67,16 +68,37 @@ flowchart TB
   VEC --> EMB
   ARANGO --> GRAG
 
-  WP -.->|"sameAs / cite"| ARANGO
-  DBO -.->|"typed facts"| ARANGO
   ARANGO -.->|"Concept / Link annotation"| IEML
 
   LEX --> AGENT["Agent / UI query"]
   EMB --> AGENT
   GRAG --> AGENT
+  AGENT -.->|"lookup when the home link is down"| WP
+  AGENT -.->|"lookup typed facts offline"| DBO
+  ARANGO -.->|"optional pointer only<br/>title / QID, not the dump"| WP
 ```
 
-**Rule of thumb:** Graph RAG over *your* notes. Wikipedia/DBpedia as a *lookup*, not as the graph you live in. IEML as a *coordinate*, not as the language agents think in.
+**Rule of thumb:** Graph RAG over *your* notes. Wikipedia/DBpedia as a **local offline encyclopedia** (files you query, like opening a book when the internet drops) — not as nodes imported into Arango. IEML as a *coordinate*, not as the language agents think in.
+
+### Terms used below
+
+Two abbreviations in this note are easy to mix up with neighbouring jargon.
+
+**LOD** here means **level of detail**, not “Linked Open Data”.
+
+In 3D and maps, you do not draw every brick of a city when you are looking at a country: you draw *less* as you zoom out. The [proposed architecture](14-proposed-architecture.md) uses the same idea for the graph on screen (and for how much you fetch):
+
+| Level | What you see / retrieve |
+|---|---|
+| **LOD 0** | Clusters / community summaries (“what is this region about?”) |
+| **LOD 1** | Nodes |
+| **LOD 2** | Relations |
+| **LOD 3** | Labels |
+| **LOD 4** | Metadata, citations, full passages |
+
+The *performance governor* picks a level from CPU/GPU/memory budget. “Render LOD” is that knob. (In Semantic Web writing, **LOD** often means *Linked Open Data* — DBpedia, Wikidata, RDF on the public web. This note spells that out as “Linked Open Data” when it comes up.)
+
+**QID** is a **Wikidata item id**: the letter `Q` plus a number. Example: [Q1290](https://www.wikidata.org/wiki/Q1290) is Pierre Lévy. Same person, same QID, whether the Wikipedia article is in French, English, or Portuguese. A **P-id** is a *property* (`P31` = “instance of”). The personal graph can store a QID as a *pointer* (“this Author is that Wikidata item”) without loading Wikidata or Wikipedia into Arango.
 
 ---
 
@@ -159,7 +181,7 @@ flowchart TB
 
 - **Query paging:** neighbours of one node, or one community level, never “all edges”.
 - **IPC paging:** bounded JSON.
-- **Render LOD:** community report ≈ LOD 0; entities ≈ LOD 1; relations ≈ LOD 2; chunk citations ≈ LOD 3–4.
+- **Render level of detail (LOD):** community report ≈ LOD 0 (clusters); entities ≈ LOD 1; relations ≈ LOD 2; chunk citations ≈ LOD 3–4. Same zoom idea as the graph on screen: do not fetch or draw everything at once.
 
 Microsoft’s **local vs global** search is almost a restatement of knowledge-mode zoom:
 
@@ -229,7 +251,7 @@ flowchart LR
   PIVOT --> ENT
   ENT --> REL
   REL --> TU
-  COM -->|"LOD 0"| MODE
+  COM -->|"level of detail 0: cluster summary"| MODE
 ```
 
 Fit to existing engines:
@@ -265,88 +287,103 @@ Default order: **lexical → optional vectors on chosen chunks → graph walk on
 
 ---
 
-## 2. Local English Wikipedia articles + DBpedia triples
+## 2. Local Wikipedia + DBpedia as an offline third-party source (fr, en, pt)
 
-Two different objects people glue together:
+The point of a local copy is **not** to pour Wikipedia into Arango (or into the personal graph). It is to have a **third-party encyclopedia on disk** when the home connection is unstable: agents and the UI can still *look up* an article or a typed fact without wikipedia.org, dbpedia.org, or Wikidata being reachable.
 
-| Dump | What it is | Order of magnitude (2026) |
+Arango stays the home of *your* relations (notes, tasks, claims, accepted links). Wikipedia stays a **separate library**. At most, a personal node stores a *pointer* (language + article title, or a Wikidata QID) so a lookup knows which file to open.
+
+Two different dump families people glue together:
+
+| Dump | What it is | Order of magnitude (2026, compressed) |
 |---|---|---|
-| **English Wikipedia `pages-articles`** | Current article wikitext (not full history) | ~**25 GB** compressed bz2 (`enwiki-*-pages-articles*.xml.bz2`); uncompressed XML is much larger (tens of GB extra on disk once parsed/indexed) |
-| **DBpedia (English / “Tiny Diamond” class)** | RDF extracted mainly from infoboxes + mappings to the DBpedia Ontology (DBO) | Historically on the order of **~0.85–1 billion triples** for the English-centric core; full multilingual extraction is ~**20 billion** triples — *not* what “English only” means |
-| **Wikidata `latest-all.json`** (comparison, not requested) | Live community KG, not infobox scrape | ~**95–145 GB** compressed JSON; uncompressed ~**1+ TB**. Heavier than DBpedia English. Better maintained. |
+| **Wikipedia `pages-articles` per language** | Current article wikitext (not full edit history) | **enwiki** ~**25 GB**; **frwiki** ~**6.5 GB**; **ptwiki** ~**2.6 GB**. Together ~**34 GB** bz2. Uncompressed XML is much larger. |
+| **DBpedia per language chapter** | RDF extracted mainly from that language’s infoboxes + mappings to the DBpedia Ontology (DBO) | English-centric core historically ~**0.85–1 billion** triples. FR and PT chapters are extra, still far below the **~20 billion** triples of *all* languages. |
+| **Wikidata `latest-all.json`** (comparison, not required) | Live community knowledge graph, language-agnostic | ~**95–145 GB** compressed JSON; uncompressed ~**1+ TB**. Heavier. Labels exist in fr/en/pt on the *same* QID. |
+| **Kiwix / ZIM** (often the right *reader* format) | Offline snapshot meant to be *opened*, not parsed as XML | Typical Wikipedia ZIMs are smaller than raw XML; built for unstable links. Articles only, not DBpedia triples. |
 
-“English only” is already a product decision: it cuts language coverage (this project’s theoretical corpus is heavily French: Lévy, Morin, IEML grammar) while keeping the dump in the same *order of magnitude* as the existing mixed personal archive (~85 GB / ~55k files in the 17-08 note).
+Wikimedia does not ship a separate “Brazilian Portuguese Wikipedia”. **`ptwiki` is Portuguese Wikipedia**, the edition used in Brazil (Brazilian Portuguese is a variety inside that wiki, not a second dump). **`frwiki`** and **`enwiki`** are the French and English encyclopedias.
+
+Those three languages are the ones this project should cover if a dump is kept at all:
+
+| Language | Role in this life / corpus |
+|---|---|
+| **French** | Native. Theoretical and IEML/Morin/Lévy material. |
+| **English** | Studied at the University of Sunderland (North East England), 2004–2008. Strongest overlap with most local LLMs and with DBpedia’s historical core. |
+| **Portuguese (Brazilian)** | Living in Brazil since 2014. `ptwiki` for that language edition. |
+
+Three language editions are still in the same *order of magnitude* as the mixed personal archive in the 17-08 note (~85 GB / ~55k files). That is a different decision from “English only”, which would have cut the native and Brazilian sides of the knowledge-oriented work.
 
 ### 2.1 Advantages
 
 | Advantage | Why it matters here |
 |---|---|
-| **Grounding / anti-hallucination** | Agents can cite a *local* article and a *typed triple* (`dbo:birthPlace`, `rdf:type dbo:Philosopher`) instead of inventing a biography. |
-| **Stable snapshot** | A dated dump is a reproducible world-state. Live SPARQL is a moving target. Matches the need for provenance and “what did we believe in 2026-08?”. |
-| **Join key for the personal graph** | `owl:sameAs` / Wikipedia title / Wikidata QID can attach *your* Note about Monnin to the public Person node without scraping wikipedia.org at query time. |
-| **Offline / loopback** | Fits the stack rule: engines on `127.0.0.1`, no CORS from the webview, no Wikipedia rate limits, works on a train. |
-| **Division of labour** | Articles → Solr (quotes, infobox-unfriendly prose). Triples → Arango or a SPARQL store (typed facts). Same extract-once / fan-out idea, public side. |
-| **Schema.org / “Thing” already in Histevents** | The 2010s diagram already pointed Location/Group at **Thing (schema.org ?)**. DBpedia/Wikidata *are* that layer, instead of hand-building it. |
-| **English as interlingua for models** | Most local LLMs are strongest in English. A FR note can still *ground* against an EN article if you accept that bias. |
+| **Works when the home link drops** | The actual reason to keep a dump: lookup does not depend on wikipedia.org, SPARQL endpoints, or a VPN. Same idea as having PDFs on disk rather than “I’ll just open the URL”. |
+| **Stays out of Arango** | The personal graph does not grow by millions of encyclopedia nodes. Wikipedia is consulted *like a book on the shelf*, not merged into Notes/Tasks. |
+| **Grounding / anti-hallucination** | Agents can quote a *local* article (fr, en, or pt) or a *typed triple* (`dbo:birthPlace`, `rdf:type dbo:Philosopher`) instead of inventing a biography. |
+| **Stable snapshot** | A dated dump is a reproducible world-state. Live websites move. Matches “what did we read while offline in 2026-08?”. |
+| **Pointer, not import** | Store `frwiki:Pierre_Lévy` / `enwiki:Pierre_Lévy` / `ptwiki:Pierre_Lévy` or one **QID** on *your* Author node. Resolve against the local dump at query time. No need to ingest the article body into Arango. |
+| **Three working languages** | A French note can hit `frwiki`; an English paper, `enwiki`; a Brazilian source, `ptwiki`. Same person can still share a QID across the three. |
+| **Schema.org / “Thing” already in Histevents** | The 2010s diagram pointed Location/Group at **Thing (schema.org ?)**. DBpedia/Wikidata *are* that public layer — as a *reference library*, not as your entity table. |
+| **English still helps models** | Many local LLMs are strongest in English. You can still *prefer* `enwiki` for model-facing lookups without deleting `frwiki`/`ptwiki` for you. |
 | **License is known** | Wikipedia text is CC BY-SA. DBpedia inherits that world. Better than a random crawl. Share-alike applies if you *publish* derivatives. |
-| **Cheap relative to Graph-RAG-ing Wikipedia** | Loading triples is finite CPU. LLM-extracting 6M articles is the cost cliff you must refuse. |
+| **Cheap relative to Graph-RAG-ing Wikipedia** | Keeping files (or a Kiwix reader, or a small SPARQL over dump files) is finite disk. LLM-extracting millions of articles is the cost cliff you must refuse. |
 
 ### 2.2 Inconvenients
 
 | Inconvenient | Why it hurts this project |
 |---|---|
-| **Disk, RAM, backup** | Articles + indexes + triples on a laptop compete with PDFs, photos, and video. On dedi-2025’s HDDs it is feasible; on a seven-year-old laptop it fights the performance governor. Indexes often exceed the dump. |
-| **Staleness** | Wikipedia changes daily. DBpedia extraction lags Wikipedia (monthly-ish cycles, mappings quality). Agents will be *wrong in a dated way*. You must version the snapshot as an ASC-visible entity (`dump--enwiki-2026-06-01`). |
-| **Infobox noise** | DBpedia is a parse of messy infoboxes. Types are incomplete; predicates collide; long-tail articles are empty. Treat as *candidates*, not ground truth. |
-| **English-only gap** | Lévy, Morin, IEML, Foucault notes, and FR Wikipedia articles will not be in the dump. “English Wikipedia as world model” silently provincializes the knowledge-oriented side. |
-| **Wrong layer for the second brain** | Revival §26: knowledge is claims, unknowns, gaps. Encyclopedias are *sources*. If DBpedia nodes outnumber personal Notes by 10⁴, the graph view becomes Wikipedia-with-a-sidebar. |
-| **Graph RAG on Wikipedia is forbidden-cost** | Community detection + LLM summaries over EN Wikipedia is an institutional budget, not a side project. Use the *already extracted* triples; do not re-extract. |
-| **Query shape** | SPARQL/AQL over a billion triples needs planning, paging, and a warm engine. Offset pagination will die. Same “never dump the graph to the webview” rule, stricter. |
-| **DBpedia vs Wikidata** | Wikidata is the living public KG. DBpedia is the *Wikipedia-shaped* extract. Choosing DBpedia for nostalgia (Linked Data 2010s) may duplicate a worse Wikidata. If the goal is “typed facts about things that have Wikipedia pages”, Wikidata subsets (or DBpedia *mappings* only) may be enough. |
+| **Disk, RAM, backup** | Three article dumps (~34 GB compressed) plus optional triples compete with PDFs, photos, and video. Indexes or ZIM readers add more. Feasible on dedi HDDs; tight on a seven-year-old laptop. |
+| **Staleness** | Wikipedia changes daily. A local copy is only as fresh as the last download. Agents will be *wrong in a dated way* while offline. Version the snapshot (`dump--frwiki-2026-06-01`, etc.). |
+| **Infobox noise (if you keep DBpedia)** | DBpedia is a parse of messy infoboxes. Types are incomplete; predicates collide; long-tail articles are empty. Treat as *candidates*, not ground truth. |
+| **Three editions ≠ three identical worlds** | The French, English, and Portuguese articles on the same topic disagree, omit, and bias differently. Offline lookup must say *which language edition* was used. A QID identifies the *item*; it does not make the three texts the same. |
+| **`ptwiki` is not “Brazil-only”** | Portuguese Wikipedia mixes European and Brazilian usage and topics. Good enough as the pt edition; not a national encyclopedia of Brazil. |
+| **Wrong layer if it leaks into the default graph** | Revival §26: knowledge is claims, unknowns, gaps. Encyclopedias are *sources*. If Wikipedia titles start appearing as first-class graph nodes, the UI becomes an offline Wikipedia with a sidebar. Pointers only. |
+| **Graph RAG on Wikipedia is forbidden-cost** | Community detection + LLM summaries over even one language edition is an institutional budget. Use the dump as *text or triples to read*, do not re-extract it. |
+| **Query shape (triples)** | SPARQL over hundreds of millions of triples needs a dedicated engine, paging, and a warm process. That engine is **not** Arango. Same “never dump the whole graph to the webview” rule. |
+| **DBpedia vs Wikidata** | Wikidata is the living public KG (one QID, labels in fr/en/pt). DBpedia is the *Wikipedia-shaped* extract per language. For “typed facts while offline”, a **Wikidata truthy subset** or Kiwix-style articles may beat three DBpedia chapters. Decide explicitly. |
 | **License share-alike** | Publishing a site/ebook that embeds Wikipedia text pulls CC BY-SA onto those pages. The `publish` pivot must know that. |
-| **Identity mess** | Three IDs for one person (Wikipedia title, DBpedia URI, Wikidata QID) plus your Author node. Without a deliberate `sameAs` policy, Graph RAG extraction will mint a fourth. |
+| **Identity mess if you import anyway** | Three titles + DBpedia URIs + QID + your Author node. Without a pointer policy, Graph RAG extraction will mint a fifth. Importing into Arango makes this worse; keeping dumps separate avoids most of it. |
 | **Not multimodal** | Dump is text/RDF. It does not help photos, ASR, or sheet music. The heterogeneous pipeline stays. |
-| **Legal/ethical scrape hygiene** | Use official dumps, not a crawler. Still a large mirrored copy of a third-party corpus; keep it out of git. |
+| **Legal/ethical scrape hygiene** | Use official dumps (or Kiwix ZIMs), not a crawler. Large third-party corpus: keep it out of git. |
 
 ### 2.3 How it should sit (if at all)
 
 ```mermaid
 flowchart TB
-  DUMP["Dated dumps on disk<br/>enwiki XML.bz2 + DBpedia nt.bz2"]
-  LOAD["ASC job: load / update snapshot"]
-  ART["Article text projection → Solr"]
-  TRIP["Triple projection → Arango or SPARQL"]
-  MAP["sameAs map:<br/>QID / dbo URI / local entity"]
-  PERS["Personal graph (Notes, Tasks, Sources)"]
+  DUMP["Dated files on disk<br/>frwiki + enwiki + ptwiki<br/>XML, ZIM, and/or DBpedia nt"]
+  READER["Offline reader / lookup<br/>Kiwix, dump grep, or SPARQL-on-files"]
+  PERS["Personal graph in Arango<br/>Notes, Tasks, Sources — yours"]
+  PTR["Optional pointer on a personal node<br/>lang + title, or QID"]
 
-  DUMP --> LOAD
-  LOAD --> ART
-  LOAD --> TRIP
-  ART --> MAP
-  TRIP --> MAP
-  PERS --> MAP
+  DUMP --> READER
+  PERS --> PTR
+  PTR -.->|"resolve when needed"| READER
 
-  MAP -->|"research pivot: bounded lookup"| UI["Tauri UI / agent"]
+  READER -->|"bounded article or fact<br/>only if the home link is down<br/>or you chose offline-first"| UI["Tauri UI / agent"]
+  PERS -->|"your relations"| UI
 ```
 
-Recommended stance, aligned with extract-once:
+The reader is an ASC-supervised **lookup**, like opening a file. It is not a fan-out indexer that copies Wikipedia into Solr+Arango by default. (You *may* later put *selected* articles into Solr if you search them often. That is still a copy of passages you chose, not “Wikipedia lives in Arango”.)
 
 | Strategy | Verdict |
 |---|---|
-| **Full EN Wikipedia + full DBpedia English in Arango as the main graph** | No. Swallows the personal graph. |
-| **Kiwix / offline Wikipedia for human reading only** | Cheap. Does not give triples. Fine as a reader, not as a KG. |
-| **Live SPARQL (DBpedia or Wikidata)** | Fine for occasional lookup. Bad for reproducible agent runs; needs network; not ASC-local. |
-| **Subset by need** | Yes. Load *only* types you already have in the old diagrams: Person, Place, Event, Work, Organization. Or a watchlist of QIDs that appear in *your* notes. |
-| **Articles in Solr, triples in a dedicated store, `sameAs` into Arango** | Yes if the snapshot is justified. Keep Wikipedia nodes out of default graph views. |
-| **Wikidata truthy subset instead of DBpedia** | Often the better public KG in 2026. Decide explicitly; do not silently ship both. |
+| **Load Wikipedia/DBpedia into Arango as graph nodes** | **No.** That was never the idea. Swallows the personal graph; fights the “conceptual graph” rule. |
+| **Kiwix / ZIM for fr + en + pt** | Strong default for **articles** while offline. Human-readable; agents can be given a CLI lookup. No triples. |
+| **Raw XML dumps on disk + a small extractor at query time** | Fine if you want scripts (`get abstract for title X in lang L`). Heavier than ZIM. Still not Arango. |
+| **DBpedia nt files + a dedicated SPARQL (or even `grep`) beside Compose** | Only if you need *typed facts* offline. Keep that store **next to** Arango, not inside it. |
+| **Live wikipedia.org / SPARQL when the link is up** | Fine. The dump is the *fallback*, not the only path. |
+| **Watchlist of titles/QIDs that appear in *your* notes** | Optional cache: copy *those* articles into the offline reader first. Much smaller than three full encyclopedias. |
+| **Wikidata truthy subset instead of three DBpedia chapters** | Often simpler for “same item, three labels”. Still a separate file/engine, not Arango. |
+| **Graph RAG over the Wikipedia dumps** | No. |
 
 ### 2.4 Verdict
 
-A **dated, English, subsetted** copy is useful as a **grounding library**: Solr for article passages, a triple store for typed facts, `sameAs` into the personal graph.
+Keep **French, English, and Portuguese** snapshots as an **offline third-party library** (Kiwix/ZIM and/or dump files; DBpedia or a Wikidata subset only if typed facts matter while disconnected).
 
-A **full** local Wikipedia+DBpedia as the knowledge-oriented default view is a category error. It recreates a web browser with worse UX and no KnowledgeGap.
+Do **not** ingest them into Arango. The personal graph may store **pointers** (titles per language, or a QID). The default knowledge view stays *your* notes, claims, and gaps.
 
-Do this only as an ASC *job* with a named snapshot entity, loopback ports, and a query allowlist (“lookup entity”, “expand types”, “get abstract”). Never as Graph RAG indexing target.
+Prefer **online lookup when the home connection works**, local dump when it does not. Never Graph-RAG the encyclopedia.
 
 ---
 
@@ -400,24 +437,83 @@ The memo [Would IEML really add tangible value for agents](../../../../asc/data/
 
 **LLMs already have a latent IEML** — paraphrase, analogy, taxonomy induction, ontology mapping — without a constructed language.
 
-The original 2010 premise (“machines have no semantics”) is false.
+The original 2010 premise (“machines have no semantics”) is false **for a single model, in a single sitting**. That model *does* have semantics. They are just trapped in its weights and in the current context window.
 
 What remains is the difference between **implicit** and **explicit** semantics:
 
 | Implicit (LLM / embeddings) | Explicit (IEML / RDF / typed graph) |
 |---|---|
 | Cat ≈ feline ≈ pet | Inspectable path through intermediate concepts |
-| Model-dependent | Can survive a model upgrade |
+| Model-dependent | Can survive a model upgrade **and a provider swap mid-task** |
 | No persistent object (Monnin) | Addressable USL / URI / entity id |
 | Flow-level intervention (Meadows) | Information-*structure* intervention |
+| Lives in one chat / one weights file | Can be read by the next model, or by `inspect-agent` |
 
-IEML is unnecessary for summarization, coding, email, brainstorming, and RAG over a few thousand documents.
+**IEML-the-language** is still unnecessary for one-shot summarization, coding, email, brainstorming, and RAG over a few thousand documents **when one model does the whole job**.
 
-It becomes interesting when you must ask, years later:
+It (or, cheaper, a **typed graph with closed vocabularies**) becomes interesting as soon as work has to **survive a change of mind** — years later:
 
 > Is today’s concept X the same as what we called Y in 2016?
 
-That is conceptual evolution, not nearest-neighbour search.
+and also **minutes later**, when ASC swaps the engine under a stable pivot.
+
+#### 3.3.1 ASC swaps implementations *and* LLM providers
+
+Revival v2 already states the consumer should ask for a **capability**, not an implementation (`pdftotext` vs Docling vs Tika; local LLM vs remote API vs another runtime). Projet Complexe ASC is that thin name: `extract`, `research`, `run-agent` stay put while the hook behind them changes.
+
+That list of LLM backends is not hypothetical. A single environment is expected to mix:
+
+| Provider | Where it runs | Typical use |
+|---|---|---|
+| **Ollama** | This laptop | Small / simple models; cheap, private, offline |
+| **Tiiny.ai** (or similar) | A device on the LAN | A bit more elaborate local inference without leaving the house |
+| **Remote model APIs** | Internet | Heavier reasoning when the home link and budget allow |
+| **Cursor CLI** (wrapped) | Local agent runtime that itself calls models/tools | Coding, repo inspection, “an agent with files and tools” rather than a raw completion |
+
+ASC’s job is to make **`run-agent` / `research` / `relate` the pivot** and the provider a *sidecar choice* (Requirement / Environment / Technology in the old task diagrams: “needs GPU”, “must stay on LAN”, “may call a remote API”). The UI and the task object must not hard-code `ollama run …`.
+
+```mermaid
+flowchart TB
+  TASK["Task (stable object)"]
+  PIVOT["ASC pivot<br/>research / relate / run-agent"]
+  TASK --> PIVOT
+
+  PIVOT --> OLLAMA["Ollama<br/>small local LLM"]
+  PIVOT --> TIINY["Tiiny.ai<br/>LAN device"]
+  PIVOT --> API["Remote API"]
+  PIVOT --> CURSOR["Cursor CLI wrap"]
+
+  OLLAMA --> ART["ASC-visible artifacts<br/>Claim, Link, KnowledgeGap, Completion"]
+  TIINY --> ART
+  API --> ART
+  CURSOR --> ART
+```
+
+The **pitfall** is not swapping models between *different* tasks. It is one task **partially** handled by several of them: Ollama drafts entities, a remote API judges a contradiction, Cursor CLI patches a file, Tiiny resumes tomorrow. Each model has its own latent map. They do **not** share “cat ≈ feline”. They only share what you **wrote down** in a form the next caller can parse.
+
+| Pitfall if the only memory is implicit | What goes wrong mid-task | What explicit structure avoids |
+|---|---|---|
+| **Entity drift** | Model A extracts “Alexandre Monnin”; model B creates “Monnin” as a new node | One Author / QID / entity id; later models *resolve*, they do not mint |
+| **Relation-type drift** | A says `contradicts`; B writes “disagrees somewhat” as prose | Closed Type of Link (`contradiction`, `complement`, …) from the knowledge diagram |
+| **Embedding mix** | Vectors from Ollama’s embedder are not comparable to an API embedder; mixing them silently ruins RAG | Named embedding space on the vector projection; do not fan-out incompatible vectors into one index |
+| **Handoff amnesia** | Model B never saw model A’s hidden state — only the last chat blob, if that | Task state, trail, KnowledgeGap, Completion as objects, not “whatever was in the prompt” |
+| **Confidence laundering** | A 7B local guess becomes “fact” when a frontier model continues from it | Provenance: `extracted_by`, model id, provider, time, confidence — revival §27 |
+| **Language / register shift** | FR note → EN-centric API; pt-BR source → small Ollama; strings diverge | Same entity id; language is a *property of the Source*, not of the identity |
+| **Shape mismatch** | Cursor CLI returns a diff; Ollama returns a paragraph; an API returns JSON | Pivot contract: bounded, typed artifacts (YAML/JSON sidecar), not free-form stdout as the system of record |
+| **Privacy / budget surprise** | Step 4 of a private task silently hits a remote API | Requirement/Environment on the task: `lan-only` vs `api-ok`; ASC enforces, the model does not decide |
+| **Resume after killswitch** | Research paused; another model restarts and re-litigates settled claims | Explicit KnowledgeGap + “what is already sufficient for decision D” |
+
+So: **yes**, explicit semantics help avoid those pitfalls — but the urgent explicit layer is the **typed personal graph + pivot I/O schema + provider provenance**, not IEML morphemes.
+
+- **ASC** names the capability and which provider ran (`run-agent` with `provider=ollama|tiiny|api|cursor-cli`).
+- **Projet Complexe** owns the meaning that must survive the hop (Claim, Link, Factor, Task, Requirement, KnowledgeGap).
+- **IEML** would only be an extra canonical *address* on durable Concepts if string ids and QIDs start to collide across years and languages. It is not required to make Ollama and Cursor CLI interoperable tomorrow.
+
+The 2010 sentence is therefore better put like this:
+
+> Machines *do* have semantics — each machine, each session, each model. They do not have **the same** semantics, and they do not keep them. ASC’s reason to exist is to keep the **name of the operation** stable while implementations (Tika *or* Ollama *or* Cursor CLI) change. Explicit structure is what keeps the **name of the thing being operated on** stable across those changes.
+
+Without that, swapping providers is only half of portability: you can change the engine and still **lose the work** at every handoff.
 
 ### 3.4 Advantages of IEML *as complement* (not as replacement)
 
@@ -425,9 +521,9 @@ That is conceptual evolution, not nearest-neighbour search.
 |---|---|---|
 | **Canonical address in meaning-space** (“compass”) | Graph RAG nodes are *strings extracted from your prose* (“resilience”). IEML would say *which* resilience. | DBpedia `dbr:Resilience` is a Wikipedia page, often a disambiguation mess. USL aims at the *concept*, not the article. |
 | **Paradigmatic computation** | Community reports are statistical clusters. IEML paradigms are *generated matrices* (roles × variables). You can ask for symmetries, not just “related entities”. | RDF `skos:broader` is asserted. IEML claims some relations *follow from form*. |
-| **Cross-language** | Extraction in EN vs FR yields different entity strings. | EN dump misses FR sense. IEML dictionary is bilingual by design (editor in FR/EN). |
-| **Survives wording and model swaps** | Re-extracting with a new LLM reshuffles the graph. A stored USL need not. | Wikipedia titles rename; redirects help, but the *sense* still sits in prose. |
-| **Interop protocol between agents** | Agents today pass JSON English (`{"goal":"find papers"}`). A semantic object could be transformed without re-parsing. | Public KGs do not know *your* task vocabulary (Requirement, KnowledgeGap). |
+| **Cross-language** | Extraction in FR vs EN vs PT yields different entity strings. | Three Wikipedia editions disagree in prose; a QID still names *one* item. IEML’s editor is FR/EN; Portuguese would be extra work. |
+| **Survives wording and model swaps** | Re-extracting with a new LLM reshuffles the graph. Mid-task hops (Ollama → API → Cursor CLI) do the same unless the pivot writes typed objects. A stored USL / entity id need not reshuffle. | Wikipedia titles rename; redirects help, but the *sense* still sits in prose. |
+| **Interop protocol between agents *and* providers** | Agents today pass JSON English (`{"goal":"find papers"}`). A semantic object can be handed to the next model without re-parsing a chat log. | Public KGs do not know *your* task vocabulary (Requirement, KnowledgeGap, `lan-only`). |
 | **Literals vs concepts** | Graph RAG mixes “Rodin” and “sculptor”. Lévy splits them: name in `<Rodin>`, concept in the phrase. | DBpedia also splits (resource vs infobox text), but URIs do not encode the split in their *shape*. |
 | **Meadows primitives as a paradigm** | You can Graph-RAG the word “stock”. You cannot *rotate* it toward “flow” as an algebraic operation unless the language supports it. | Wikipedia has articles; it does not have a generated systems-theory matrix. |
 | **Metadata ethics** | Lévy: semantic metadata are political (who organizes digital memory). A closed IEML layer is at least *inspectable*. | GAFAM KGs and Wikidata are inspectable in theory, ungovernable in practice for a personal stack. |
@@ -442,7 +538,7 @@ Those can be satisfied by RDF, property graphs, or a tiny typed IR. IEML is one 
 
 | Inconvenient | Consequence |
 |---|---|
-| **Redundancy with LLMs for most agent work** | Complexity for no daily gain. Matches “where IEML is unnecessary”. |
+| **Redundancy with LLMs for most *single-model* work** | One Ollama call to summarize a note still does not need IEML. Multi-provider *handoff* needs a typed IR; that IR can be YAML/Arango, not IEML. |
 | **Tiny ecosystem vs RDF / Wikidata / Arango** | Parsers, editors, SPARQL, dump tooling, sameAs graphs already exist for DBpedia. IEML has a demonstrator editor and papers. |
 | **Human authoring failed historically** | Lévy now says LLMs should translate. Quality of *that* translation is unproven; garbage USLs would be a false sense of precision. |
 | **Third ontology risk** | Personal graph + DBpedia + IEML + Graph RAG entity titles = four names for one idea. Revival: do not freeze a giant schema. |
@@ -457,36 +553,39 @@ Those can be satisfied by RDF, property graphs, or a tiny typed IR. IEML is one 
 
 ### 3.6 How to use it without implementing it (recommended)
 
-Same hybrid as the 2026 memos: **LLM remains the cognitive engine; a symbolic layer is derived only when persistence matters.**
+Same hybrid as the 2026 memos: **some LLM remains the cognitive engine; which LLM is an ASC implementation; a symbolic layer is derived whenever the result must be handed to another provider or kept.**
 
 ```mermaid
 flowchart TB
-  NL[Natural language: notes, PDFs, agent talk] --> LLM
-  LLM --> FAST[Fast reasoning: write, code, search]
-  LLM --> EXT["Extraction when we keep it"]
+  NL[Natural language: notes, PDFs, agent talk] --> PIVOT["ASC pivot<br/>research / relate / run-agent"]
+  PIVOT --> PROVDR["Provider capability:<br/>Ollama / Tiiny / API / Cursor CLI"]
+  PROVDR --> FAST[Fast reasoning: write, code, search]
+  PROVDR --> EXT["Extraction when we keep it or hand it off"]
   EXT --> GRAPH["Typed graph: Note, Claim, Link, Factor,<br/>Task, Requirement, KnowledgeGap"]
-  GRAPH --> PROV[Provenance / version / evidence / confidence]
+  GRAPH --> META["Provenance: provider, model id, time,<br/>confidence, version, evidence"]
   GRAPH -.->|"optional later"| IEML["IEML USL or other canonical IR<br/>on Concept nodes only"]
   GRAPH --> ENGINES[Solr / pgvector / Arango]
   IEML -.-> ENGINES
+  GRAPH -->|"next hop reads this, not the chat"| PIVOT
 ```
 
 Practical rules:
 
-1. **Day one:** typed graph + uncertainty + KnowledgeGap. No IEML runtime.
-2. **If a Concept keeps being paraphrased across years:** then consider a canonical id. That id may be a USL, a Wikidata QID, or an ASC-safe slug. Choose by *tooling*, not by loyalty.
-3. **Never** ask agents to “think in IEML”. Translate out, manipulate, translate back — if at all.
-4. **If IEML is tried:** a Projet Complexe ASC pivot (`relate` / `annotate-concept`), same as code-graph-rag. UI still sees coordinates and titles.
+1. **Day one:** typed graph + uncertainty + KnowledgeGap + **which provider produced this step**. No IEML runtime.
+2. **Pivot I/O is the handoff contract.** `run-agent` returns bounded artifacts, not “the model’s personality.” That is what makes Ollama, Tiiny, an API, and Cursor CLI interchangeable under one name.
+3. **If a Concept keeps being paraphrased across years *or* across providers:** then consider a canonical id. That id may be a USL, a Wikidata QID (`Q…` item number), or an ASC-safe slug. Choose by *tooling*, not by loyalty. A QID is a *pointer into the public library*, not a reason to import Wikidata into Arango.
+4. **Never** ask agents to “think in IEML”. Translate out, manipulate, translate back — if at all.
+5. **If IEML is tried:** a Projet Complexe ASC pivot (`relate` / `annotate-concept`), same as code-graph-rag. UI still sees coordinates and titles.
 
 Lévy vs this architecture, honestly:
 
 | Lévy 2023 | Projet Complexe 2026 |
 |---|---|
 | IEML as protocol of digital memory | ASC as protocol of *execution*; Projet Complexe as *interpretation* |
-| USL as URI | Entity ids + Wikipedia/QID `sameAs` already cover reference |
-| Neurosymbolic integration | LLM + graph + vectors, IEML optional |
+| USL as URI | Entity ids + optional Wikipedia title / QID *pointers* already cover reference |
+| Neurosymbolic integration | Several LLMs behind one pivot + graph + vectors, IEML optional |
 | Collective-intelligence encyclopedia | Personal second brain + optional public grounding |
-| Algebraic paradigms | Performance LOD + genericity zoom (related *intuition*, different mechanism) |
+| Algebraic paradigms | Performance **level of detail** + genericity zoom (related *intuition*, different mechanism) |
 
 The overlap that *is* worth stealing: **semantic metadata as first-class**, **canonical form**, **do not let embeddings be the only memory**.
 
@@ -494,9 +593,11 @@ The overlap that *is* worth stealing: **semantic metadata as first-class**, **ca
 
 IEML adds **tangible value only as a design compass and, later, as an optional annotation on durable Concept nodes**.
 
+**Multi-provider ASC does make explicit semantics urgent** — not because Ollama “has no meaning”, but because Ollama’s meaning does not travel to Tiiny, to a remote API, or to Cursor CLI. The thing that travels is the typed graph (and provenance of who wrote it). That can be YAML and Arango. It does not have to be IEML.
+
 It does **not** replace Graph RAG (corpus structure), DBpedia/Wikidata (reference), Solr (words), or the task/knowledge killswitch (control).
 
-Implementing the language before the typed personal graph would be a 2012-shaped mistake with 2026 compute bills.
+Implementing the language before the typed personal graph — and before a pivot contract that names the LLM provider — would be a 2012-shaped mistake with 2026 compute bills.
 
 ---
 
@@ -572,7 +673,7 @@ flowchart TB
   PART --> ROLE
 ```
 
-**2026 reading:** `Participation` is Graph RAG’s Relationship (needs its own data: role). `Thing (schema.org ?)` is the DBpedia/Wikidata join. `Period.parent` is knowledge-mode *time zoom* (epoch → century → year) already described in the UI note. Do not LLM-extract all of Wikipedia to fill this; attach QIDs.
+**2026 reading:** `Participation` is Graph RAG’s Relationship (needs its own data: role). `Thing (schema.org ?)` is the *public* DBpedia/Wikidata layer — looked up offline if needed, not loaded into Arango. `Period.parent` is knowledge-mode *time zoom* (epoch → century → year) already described in the UI note. Do not LLM-extract Wikipedia to fill this; store a QID or a `frwiki`/`enwiki`/`ptwiki` title as a pointer.
 
 ### 4.2 Knowledge-oriented Entity Diagram v08
 
@@ -826,8 +927,8 @@ flowchart LR
 |---|---|
 | Source / Assembly / Note | Files + Solr + citations |
 | Link + Type of Link + Factor | Schema-guided Graph RAG *proposals*, then human/agent-accepted Arango edges |
-| Concept / Domain / Topic | Personal taxonomy; optional QID; optional IEML USL *later* |
-| Event / Person / Location / Thing | Wikipedia/DBpedia/Wikidata subset |
+| Concept / Domain / Topic | Personal taxonomy; optional QID pointer; optional IEML USL *later* |
+| Event / Person / Location / Thing | Offline Wikipedia/DBpedia/Wikidata *library* (fr/en/pt), not Arango nodes |
 | Task / Implementation / Requirement / Fallback | Agent control + killswitch; not an LLM latent graph |
 | Comparison | Explicit pages (already a content type), not a cosine |
 | Participation / Completion / Estimation | Reified relations with data — Graph RAG “covariates” |
@@ -840,18 +941,19 @@ flowchart LR
 flowchart TB
   subgraph do["Do"]
     D1["Solr first on personal text"]
-    D2["Typed personal graph: Note, Claim, Link, Task, Requirement, KnowledgeGap"]
+    D2["Typed personal graph + provider provenance<br/>handoff contract for Ollama / Tiiny / API / Cursor CLI"]
     D3["Graph RAG only on selected corpora, schema-guided types"]
-    D4["Public dumps as dated lookup + sameAs, subsetted"]
+    D4["fr+en+pt Wikipedia/DBpedia as offline files<br/>pointers only, not imported into Arango"]
     D5["IEML as compass; USL only on durable Concepts if tooling appears"]
   end
 
   subgraph dont["Do not"]
     N1["Graph-RAG Wikipedia"]
-    N2["Put DBpedia in the default knowledge view"]
+    N2["Load Wikipedia or DBpedia into Arango"]
     N3["Ask agents to think in IEML"]
     N4["Encode IEML in the UI hash or ASC core"]
     N5["One database that is 'the brain'"]
+    N6["Treat a chat log as the only memory across LLM providers"]
   end
 ```
 
@@ -861,11 +963,13 @@ flowchart TB
 
 ## Open choices (not decided here)
 
-- Wikidata subset vs DBpedia English vs both, for `sameAs`.
+- Kiwix ZIM vs raw XML vs DBpedia files vs a Wikidata truthy subset, for **offline** fr/en/pt lookup (never as an Arango import).
+- Whether a personal node stores a QID, language-specific titles, or both, as pointers.
 - Whether community reports are first-class Notes (knowledge-oriented) or generated sidecars Solr can search.
 - Closed vocabulary for Graph RAG extraction: reuse Type of Link from v08, or a smaller revival set (`supports`, `conflicts`, `unknown`, `sufficient-for`).
 - Whether Requirement/Condition stay distinct (v02 todo) once agents generate fallback chains.
 - If a Concept ever gets an IEML USL: store it as annotation, never as the only id.
+- How `run-agent` names the provider capability (`ollama` / `tiiny` / `api` / `cursor-cli`) and whether Environment/Requirement from the task diagram gate `lan-only` vs remote.
 
 Those can stay experiments behind `index` / `relate` / `research`. They do not change the rule:
 
