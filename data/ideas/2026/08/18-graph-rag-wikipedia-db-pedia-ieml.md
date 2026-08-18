@@ -1,9 +1,9 @@
-# Graph RAG, Wikipedia / DBpedia, and IEML
+# Graph RAG, Wikipedia / DBpedia, public ontologies, and IEML
 
 - **Date:** 2026-08-18
-- **Updated:** 2026-08-18 — FR/EN/pt-BR dumps; Wikipedia as offline third-party source (not Arango); glossary for LOD and QID; multi-provider LLM handoff vs implicit semantics
+- **Updated:** 2026-08-18 — FR/EN/pt-BR dumps; Wikipedia as offline third-party source (not Arango); glossary for LOD and QID; multi-provider LLM handoff vs implicit semantics; schema.org and neighbouring public ontologies (names vs runtime)
 - **Status:** idea / architecture note (not a spec, not an implementation plan)
-- **Scope:** what Graph RAG is and why it exists; whether a local Wikipedia + DBpedia copy in French, English, and Portuguese is worth it as an offline source; whether IEML adds anything beside graphs, dumps, and LLMs; mermaid translations of the 2009–2014 entity diagrams
+- **Scope:** what Graph RAG is and why it exists; whether a local Wikipedia + DBpedia copy in French, English, and Portuguese is worth it as an offline source; whether schema.org / Dublin Core / SKOS / PROV-O / OWL add anything as ontologies; whether IEML adds anything beside graphs, dumps, and LLMs; mermaid translations of the 2009–2014 entity diagrams
 - **Related:**
   - [14-proposed-architecture.md](14-proposed-architecture.md) — ASC control plane, conceptual graph, LOD / performance governor
   - [17-local-dev-stack-architecture.md](17-local-dev-stack-architecture.md) — extract-once, Solr + pgvector + Arango, paging, cost cliffs
@@ -22,15 +22,16 @@ The 2026 revival already decided three things that this note must not undo:
 2. **Knowledge is not merely RAG** (revival v2 §26). Claims, sources, evidence, unknowns, and knowledge-gaps are the model. Indexes are mechanisms.
 3. **IEML is a compass, not a runtime** ([17-ui-design-ideas.md](17-ui-design-ideas.md): do not encode IEML morphemes in the location hash).
 
-The remaining question is how three *external* knowledge technologies sit on that architecture:
+The remaining question is how four *external* knowledge technologies sit on that architecture:
 
 | Technology | What it is, in one line | Layer it would occupy |
 |---|---|---|
 | **Graph RAG** | Build a graph from *your* texts, then retrieve a *bounded subgraph* (or a community summary) instead of the nearest embedding chunks | Indexer / query strategy over the personal corpus |
 | **Wikipedia articles + DBpedia triples (fr, en, pt)** | A frozen public encyclopedia on disk: prose and/or RDF, consulted when the home link is down | Optional *offline third-party source*, not the second brain and not an Arango load |
+| **schema.org and neighbours** | Shared *type and property names* (Person, Place, `dc:creator`, `wasGeneratedBy`, …) used by search engines and Linked Open Data | Optional *spelling* of a few public-world types; not a graph to load and not the personal vocabulary |
 | **IEML** | A constructed language whose *form* is meant to be semantically computable (syntagmatic *and* paradigmatic) | Optional *coordinate system* for concepts, if ever derived |
 
-They are complementary only if each one is used for the job the others cannot do. Mixing them into one “knowledge graph product” is how the project would freeze a bad ontology.
+They are complementary only if each one is used for the job the others cannot do. Mixing them into one “knowledge graph product” is how the project would freeze a bad ontology. schema.org is the most tempting freeze: it looks official, it already appears as `Thing (schema.org ?)` on the 2010s Histevents diagram, and it still does not name a KnowledgeGap.
 
 ```mermaid
 flowchart TB
@@ -78,7 +79,7 @@ flowchart TB
   ARANGO -.->|"optional pointer only<br/>title / QID, not the dump"| WP
 ```
 
-**Rule of thumb:** Graph RAG over *your* notes. Wikipedia/DBpedia as a **local offline encyclopedia** (files you query, like opening a book when the internet drops) — not as nodes imported into Arango. IEML as a *coordinate*, not as the language agents think in.
+**Rule of thumb:** Graph RAG over *your* notes. Wikipedia/DBpedia as a **local offline encyclopedia** (files you query, like opening a book when the internet drops) — not as nodes imported into Arango. schema.org as a **handful of type names**, not as an OWL stack. IEML as a *coordinate*, not as the language agents think in.
 
 ### Terms used below
 
@@ -270,7 +271,7 @@ Fit to existing engines:
 - Task: alternative, quality / downside, requirement AND/OR/fallback
 - Revival: `X is suspected`, `X conflicts with Z`, `X is sufficient for decision D`
 
-If Graph RAG is used, **constrain extraction** to that closed vocabulary (schema-guided), or you will drown in mushy edges.
+If Graph RAG is used, **constrain extraction** to that closed vocabulary (schema-guided), or you will drown in mushy edges. “Schema-guided” here means *your* Type of Link / Histevents kinds — not “download schema.org and extract against 800 classes” ([§2.5](#25-schemaorg-and-other-public-ontologies)).
 
 ### 1.6 Verdict
 
@@ -324,7 +325,7 @@ Three language editions are still in the same *order of magnitude* as the mixed 
 | **Stable snapshot** | A dated dump is a reproducible world-state. Live websites move. Matches “what did we read while offline in 2026-08?”. |
 | **Pointer, not import** | Store `frwiki:Pierre_Lévy` / `enwiki:Pierre_Lévy` / `ptwiki:Pierre_Lévy` or one **QID** on *your* Author node. Resolve against the local dump at query time. No need to ingest the article body into Arango. |
 | **Three working languages** | A French note can hit `frwiki`; an English paper, `enwiki`; a Brazilian source, `ptwiki`. Same person can still share a QID across the three. |
-| **Schema.org / “Thing” already in Histevents** | The 2010s diagram pointed Location/Group at **Thing (schema.org ?)**. DBpedia/Wikidata *are* that public layer — as a *reference library*, not as your entity table. |
+| **Schema.org / “Thing” already in Histevents** | The 2010s diagram pointed Location/Group at **Thing (schema.org ?)**. That “?” is answered in [§2.5](#25-schemaorg-and-other-public-ontologies): DBpedia/Wikidata are the *instance* library; schema.org is only a *class spelling*. Neither is your entity table. |
 | **English still helps models** | Many local LLMs are strongest in English. You can still *prefer* `enwiki` for model-facing lookups without deleting `frwiki`/`ptwiki` for you. |
 | **License is known** | Wikipedia text is CC BY-SA. DBpedia inherits that world. Better than a random crawl. Share-alike applies if you *publish* derivatives. |
 | **Cheap relative to Graph-RAG-ing Wikipedia** | Keeping files (or a Kiwix reader, or a small SPARQL over dump files) is finite disk. LLM-extracting millions of articles is the cost cliff you must refuse. |
@@ -387,6 +388,116 @@ Prefer **online lookup when the home connection works**, local dump when it does
 
 ---
 
+## 2.5 schema.org and other public ontologies
+
+The Histevents diagram already asked this: Location and Group point at **Thing (schema.org ?)**. That is a *vocabulary* question, not a dump question. schema.org does not ship Pierre Lévy. It ships the class `Person`. Wikidata `Q1290` and `frwiki:Pierre_Lévy` are instances. Mixing those two jobs is how “we should use schema.org” quietly becomes a second Drupal taxonomy.
+
+### 2.5.1 What these things are
+
+Public ontologies are **shared type and property names**. They answer “what *kind* of thing is this?” in a language search engines and Linked Open Data already use. They are not a second encyclopedia, not Graph RAG, and not IEML.
+
+The widely used ones, for this project’s purpose (not an ontology census):
+
+| Vocabulary | What it actually is | Typical classes / properties | Relation to this stack |
+|---|---|---|---|
+| **[schema.org](https://schema.org)** | Vocabulary for marking up web pages so Google / Bing / Yandex can make rich results (usually JSON-LD). The most *deployed* “ontology” on the public web. | `Thing` → `Person`, `Organization`, `Place`, `Event`, `CreativeWork`, `Product`, … plus thousands of properties | The Histevents “?” — public-*world* types |
+| **Wikidata** (P31 and properties) | Living community knowledge graph; language-agnostic items | `instance of` (P31), `occupation` (P106), … | Already the *pointer* layer (QID). Classes are *your* `P31`, not schema.org imports |
+| **DBpedia Ontology (DBO)** | Types extracted from Wikipedia infobox mappings | `dbo:Philosopher`, `dbo:birthPlace` | Comes with a DBpedia dump; English-centric. Already in §2 |
+| **Dublin Core (DC / [DCTERMS](https://www.dublincore.org/specifications/dublin-core/dcmi-terms/))** | Tiny bibliographic set, 1990s–now; still what librarians and `meta` tags use | `title`, `creator`, `date`, `rights`, `type` | Names for Source / Assembly fields. Solr already thinks this way |
+| **[SKOS](https://www.w3.org/TR/skos-reference/)** | Thesaurus pattern (W3C) | `broader` / `narrower` / `prefLabel` / `altLabel` | Same *shape* as Topic / Domain `parent` loops |
+| **FOAF** | People and homepages (2000s Semantic Web) | `Person`, `knows`, `mbox` | Largely absorbed by schema.org `Person` + Wikidata. Ignore as a stack |
+| **[PROV-O](https://www.w3.org/TR/prov-o/)** | W3C provenance | `wasGeneratedBy`, `used`, `wasDerivedFrom` | Same *job* as revival §27 (`extracted_by`, provider, time) |
+| **RDFS / OWL** | The *meta* languages for writing ontologies | `subClassOf`, `equivalentClass`, reasoners | How DBpedia maps `dbo:Person` to `schema:Person`. Not a domain to implement |
+| **Open Graph Protocol** | Facebook/LinkedIn link-preview markup | `og:title`, `og:type` | Even thinner web-page metadata. Irrelevant inside Tauri |
+
+Honourable mentions that look serious and would be a mistake here: **CIDOC-CRM** (museums and cultural heritage), **BFO / DOLCE / SUMO / Cyc** (upper ontologies), **BIBO / FRBR** (library theory). Those are careers, not Compose pivots.
+
+DBpedia already declares things like `dbo:Person owl:equivalentClass schema:Person`. Wikidata items often carry the same alignment. If you keep dump files, you **already have** schema.org alignment without adopting schema.org as a product.
+
+### 2.5.2 Would they add value?
+
+**Almost none as a runtime. A little as stolen names.**
+
+The project already has three type systems that matter:
+
+1. **Personal interpretive vocabulary** (knowledge v08 / task v09): Note, Claim, Link, Factor, KnowledgeGap, Requirement, Fallback — *not* in schema.org.
+2. **Public identity** (QID / wiki title): *this* Person — not a class.
+3. **Closed relation types** for Graph RAG: contradiction, complementarity, variant — schema.org’s `relatedTo` / `mentions` are mushier than v08.
+
+schema.org’s `Thing` tree overlaps **Histevents** (`Person`, `Place`, `Organization`, `Event`, `CreativeWork`) and almost completely misses **knowledge-oriented** and **task-oriented** objects. Google never needed a KnowledgeGap.
+
+```mermaid
+flowchart TB
+  subgraph steal["Worth stealing: a dozen names"]
+    DC["Dublin Core<br/>Source fields"]
+    PROV["PROV-O-shaped<br/>extracted_by"]
+    SDO["schema.org<br/>Person / Place / Event<br/>optional spelling"]
+  end
+
+  subgraph already["Already the public layer"]
+    QID["Wikidata QID pointer"]
+    DBO["DBpedia types in dump files"]
+  end
+
+  subgraph ours["Projet Complexe owns these"]
+    KO["Claim, Link, Factor, KnowledgeGap"]
+    TO["Task, Requirement, Fallback"]
+  end
+
+  SDO -.->|"same kind"| QID
+  DBO -.->|"owl:equivalentClass"| SDO
+```
+
+#### Advantages (the thin slice)
+
+| Advantage | Why it might still matter |
+|---|---|
+| **Shared names for public-world kinds** | Saying `type: Person` (meaning [schema.org/Person](https://schema.org/Person)) on a node that also has a QID is a *convention* other tools understand. Cheap documentation. |
+| **Constrains Graph RAG extraction** | A *tiny* allowlist (`Person`, `Place`, `Organization`, `Event`, `CreativeWork`) is better than free-form entity types. The 2010s Histevents types already *are* that allowlist; schema.org is one published spelling of it. |
+| **Dublin Core field names** | `dc:title` / `dc:creator` / `dc:rights` for Source metadata. No reason to invent `titre_du_document`. |
+| **PROV-O *names*** | `wasGeneratedBy` ≈ `extracted_by` + provider. Aligns provenance YAML with a known vocab without running a reasoner. |
+| **SKOS *pattern*** | `broader` is `parent` on Topic/Domain. Keep the parent loop; do not stand up a SKOS triple store. |
+| **JSON-LD as an *export* later** | If `publish` ever emits a public page, schema.org JSON-LD is how search engines read it. That is a *publish* concern, not the second brain. |
+| **Mappings you do not have to maintain** | DBpedia ↔ schema.org ↔ Wikidata already exists. You do not need a local OWL reasoner to know Person is Person. |
+
+#### Inconvenients (why they mostly do not pay rent)
+
+| Inconvenient | Why it hurts this project |
+|---|---|
+| **Wrong job** | schema.org exists so a search engine can rich-result a recipe. This app is not crawled. There is no consumer of your JSON-LD except you. |
+| **Giant schema vs revival** | schema.org has on the order of **800+ types** and thousands of properties. Loading it as “the ontology” is the freeze-a-bad-schema failure already named in the intro. |
+| **Misses the objects you actually care about** | No Claim, Evidence, KnowledgeGap, Type of Link (`contradiction`), Factor, Requirement, Fallback, Completion. Those are Projet Complexe’s value. |
+| **Types ≠ identity** | `schema:Person` is a class. Pierre Lévy is a QID. The 2010s “?” was already answered by DBpedia/Wikidata as a *library*, not by importing schema.org classes into Arango. |
+| **Fourth (fifth) name for one idea** | Personal slug + wiki title + QID + `dbo:` + `schema:Person` + IEML USL. Same identity mess as §2.2. |
+| **JSON-LD in the Tauri webview** | A second ontology in the frontend, which [17-ui-design-ideas.md](17-ui-design-ideas.md) already forbids. |
+| **FOAF / OGP / GoodRelations** | Absorbed, commercial, or dead. Ignore. |
+| **Upper ontologies (BFO, Cyc, SUMO, DOLCE)** | Philosophers arguing about continuants. The 2012 Drupal-taxonomy trap with more axioms. |
+| **CIDOC-CRM / FRBR** | Histevents-*adjacent* and still a research career. Not a first pivot. |
+| **OWL reasoning** | Classification as a decision procedure is attractive (Lévy, Morin, “architecting my mind”) and is how you lose years. The performance governor and KnowledgeGap are the 2026 answer to overload, not `owl:disjointWith`. |
+
+### 2.5.3 How it should sit (if at all)
+
+| Strategy | Verdict |
+|---|---|
+| **Import schema.org (or OWL, SKOS, CIDOC) into Arango as the type system** | **No.** Same as “load DBpedia into Arango”. |
+| **Mark every Note as JSON-LD `schema:Article`** | No. Notes are epistemic objects, not web pages. |
+| **Tiny allowlist of public-world types**, spelled as Histevents names or as schema.org URLs | Optional. Prefer the 2010s names (`Person`, `Location`, `Group`, `Event`). If you want an external spelling, `schema:Person` on *those* nodes only, next to a QID. |
+| **Dublin Core keys on Source** | Fine. Field names, not a graph. |
+| **PROV-O-shaped provenance on Claims** | Fine. Names, not a reasoner. |
+| **SKOS for Topic.parent** | The pattern already exists. Do not add a SKOS database. |
+| **schema.org JSON-LD at `publish` time** | Later, if a public site exists. Not the local graph. |
+| **Align IEML USLs to schema.org classes** | No. Two research ontologies glued together. |
+
+### 2.5.4 Verdict
+
+**schema.org does not add a new capability.** Identity is QID / title pointers. Typed facts while offline are DBpedia or Wikidata dumps. Corpus structure is Graph RAG. Sense / paradigms is IEML-the-compass. Personal epistemology is v08 / v09.
+
+What *is* worth stealing: a **dozen names** (`Person`, `Place`, `Event`, `CreativeWork`; `dc:creator`; `wasGeneratedBy`) so Graph RAG extraction and Source metadata stay boring. That is schema-guided extraction in §1.5, not an ontology project.
+
+Using schema.org (or SKOS, FOAF, OWL, CIDOC) as a *system to implement* would add another ontology and still would not name a KnowledgeGap. The 2010s “Thing (schema.org ?)” is best read as: **public-world kinds may reuse a well-known spelling; the public *instances* stay in the offline library; your Claims stay yours.**
+
+---
+
 ## 3. IEML as a complementary tool
 
 Sources for this section: Lévy, *Calculer la sémantique avec IEML* (2023, HAL); *La sphère sémantique*; the IEML grammar and dictionary PDFs; the 2010s [IEML-Analysis-v07](assets/IEML-Analysis-v07.png); and the 2026 memos on agents.
@@ -429,7 +540,7 @@ The Foundations doc already names the wound Graph RAG still has not healed:
 
 Lévy and Morin are listed there as the *corpus de référence*. IEML was the hope that classification could be **computable** rather than a pile of Drupal taxonomies.
 
-DBpedia/RDF answered *reference* (“this URI denotes Rodin”). IEML claims to answer *sense* (“sculptor” as a position in a paradigm, transformable by algebraic operations). Graph RAG answers *corpus structure* (“in *my* notes, Rodin is linked to these claims”). Three different questions.
+DBpedia/RDF answered *reference* (“this URI denotes Rodin”). schema.org answered *kind for the web* (“Rodin is a `Person` / `CreativeWork` in Google’s dialect”). IEML claims to answer *sense* (“sculptor” as a position in a paradigm, transformable by algebraic operations). Graph RAG answers *corpus structure* (“in *my* notes, Rodin is linked to these claims”). Four different questions. schema.org does not replace the other three; it barely overlaps Histevents.
 
 ### 3.3 The 2026 agent question: still mostly redundant, in a precise sense
 
@@ -541,7 +652,7 @@ Those can be satisfied by RDF, property graphs, or a tiny typed IR. IEML is one 
 | **Redundancy with LLMs for most *single-model* work** | One Ollama call to summarize a note still does not need IEML. Multi-provider *handoff* needs a typed IR; that IR can be YAML/Arango, not IEML. |
 | **Tiny ecosystem vs RDF / Wikidata / Arango** | Parsers, editors, SPARQL, dump tooling, sameAs graphs already exist for DBpedia. IEML has a demonstrator editor and papers. |
 | **Human authoring failed historically** | Lévy now says LLMs should translate. Quality of *that* translation is unproven; garbage USLs would be a false sense of precision. |
-| **Third ontology risk** | Personal graph + DBpedia + IEML + Graph RAG entity titles = four names for one idea. Revival: do not freeze a giant schema. |
+| **Third ontology risk** | Personal graph + DBpedia + schema.org + IEML + Graph RAG entity titles = five names for one idea. Revival: do not freeze a giant schema. schema.org is the most respectable-looking freeze ([§2.5](#25-schemaorg-and-other-public-ontologies)). |
 | **Dictionary scale** | ~3000 words vs millions of Wikipedia topics. Coverage of *your* research (ecological redirection, ASC pivots, Drupal history) will be sparse unless you extend the dictionary — i.e. become an IEML ontologist. |
 | **IEML-Analysis-v07 complexity** | The 2010s map (circuits, cités, bulbes, rhizomes) is exactly the “giant graph schema” the revival forbids as a first milestone. |
 | **Not ASC, not the UI codec** | Putting morphemes in hashes or as ASC primitives contaminates the computational vocabulary with a linguistic theory. Already rejected. |
@@ -595,7 +706,7 @@ IEML adds **tangible value only as a design compass and, later, as an optional a
 
 **Multi-provider ASC does make explicit semantics urgent** — not because Ollama “has no meaning”, but because Ollama’s meaning does not travel to Tiiny, to a remote API, or to Cursor CLI. The thing that travels is the typed graph (and provenance of who wrote it). That can be YAML and Arango. It does not have to be IEML.
 
-It does **not** replace Graph RAG (corpus structure), DBpedia/Wikidata (reference), Solr (words), or the task/knowledge killswitch (control).
+It does **not** replace Graph RAG (corpus structure), DBpedia/Wikidata (reference), schema.org (a few public type *names*), Solr (words), or the task/knowledge killswitch (control).
 
 Implementing the language before the typed personal graph — and before a pivot contract that names the LLM provider — would be a 2012-shaped mistake with 2026 compute bills.
 
@@ -603,7 +714,7 @@ Implementing the language before the typed personal graph — and before a pivot
 
 ## 4. Legacy entity diagrams → mermaid
 
-These diagrams (Histevents v04, Knowledge-oriented v08, Task-oriented v09, Minimal Reasoning Model v02) are the **pre-ASC, pre-LLM** data model. They still name the objects Graph RAG would extract, DBpedia would ground, and IEML would try to coordinate.
+These diagrams (Histevents v04, Knowledge-oriented v08, Task-oriented v09, Minimal Reasoning Model v02) are the **pre-ASC, pre-LLM** data model. They still name the objects Graph RAG would extract, DBpedia would ground, schema.org would try to *type*, and IEML would try to coordinate.
 
 Shared legend (all four):
 
@@ -673,7 +784,7 @@ flowchart TB
   PART --> ROLE
 ```
 
-**2026 reading:** `Participation` is Graph RAG’s Relationship (needs its own data: role). `Thing (schema.org ?)` is the *public* DBpedia/Wikidata layer — looked up offline if needed, not loaded into Arango. `Period.parent` is knowledge-mode *time zoom* (epoch → century → year) already described in the UI note. Do not LLM-extract Wikipedia to fill this; store a QID or a `frwiki`/`enwiki`/`ptwiki` title as a pointer.
+**2026 reading:** `Participation` is Graph RAG’s Relationship (needs its own data: role). `Thing (schema.org ?)` is **not** “import schema.org”. It is the *public kind* of Location/Group: optionally spelled as `schema:Person` / `schema:Place`, identified by a QID, looked up in the offline Wikipedia/DBpedia library — never loaded into Arango as the type system ([§2.5](#25-schemaorg-and-other-public-ontologies)). `Period.parent` is knowledge-mode *time zoom* (epoch → century → year) already described in the UI note. Do not LLM-extract Wikipedia to fill this; store a QID or a `frwiki`/`enwiki`/`ptwiki` title as a pointer.
 
 ### 4.2 Knowledge-oriented Entity Diagram v08
 
@@ -925,10 +1036,10 @@ flowchart LR
 
 | 2010s object | 2026 mechanism |
 |---|---|
-| Source / Assembly / Note | Files + Solr + citations |
+| Source / Assembly / Note | Files + Solr + citations. Dublin Core names (`title`, `creator`, `rights`) are fine as *field* labels |
 | Link + Type of Link + Factor | Schema-guided Graph RAG *proposals*, then human/agent-accepted Arango edges |
 | Concept / Domain / Topic | Personal taxonomy; optional QID pointer; optional IEML USL *later* |
-| Event / Person / Location / Thing | Offline Wikipedia/DBpedia/Wikidata *library* (fr/en/pt), not Arango nodes |
+| Event / Person / Location / Thing | Offline Wikipedia/DBpedia/Wikidata *library* (fr/en/pt), not Arango nodes. schema.org at most *spells* the kind (`Person`), never supplies the instance |
 | Task / Implementation / Requirement / Fallback | Agent control + killswitch; not an LLM latent graph |
 | Comparison | Explicit pages (already a content type), not a cosine |
 | Participation / Completion / Estimation | Reified relations with data — Graph RAG “covariates” |
@@ -945,6 +1056,7 @@ flowchart TB
     D3["Graph RAG only on selected corpora, schema-guided types"]
     D4["fr+en+pt Wikipedia/DBpedia as offline files<br/>pointers only, not imported into Arango"]
     D5["IEML as compass; USL only on durable Concepts if tooling appears"]
+    D6["Steal a dozen public names<br/>schema.org Person/Place, dc:creator, PROV-O-shaped provenance"]
   end
 
   subgraph dont["Do not"]
@@ -954,6 +1066,7 @@ flowchart TB
     N4["Encode IEML in the UI hash or ASC core"]
     N5["One database that is 'the brain'"]
     N6["Treat a chat log as the only memory across LLM providers"]
+    N7["Import schema.org / OWL / SKOS / CIDOC as the graph schema"]
   end
 ```
 
@@ -966,11 +1079,11 @@ flowchart TB
 - Kiwix ZIM vs raw XML vs DBpedia files vs a Wikidata truthy subset, for **offline** fr/en/pt lookup (never as an Arango import).
 - Whether a personal node stores a QID, language-specific titles, or both, as pointers.
 - Whether community reports are first-class Notes (knowledge-oriented) or generated sidecars Solr can search.
-- Closed vocabulary for Graph RAG extraction: reuse Type of Link from v08, or a smaller revival set (`supports`, `conflicts`, `unknown`, `sufficient-for`).
+- Closed vocabulary for Graph RAG extraction: reuse Type of Link from v08, or a smaller revival set (`supports`, `conflicts`, `unknown`, `sufficient-for`). Public-world *entity* types: Histevents names, or a handful of schema.org URLs next to a QID — never the whole schema.org tree.
 - Whether Requirement/Condition stay distinct (v02 todo) once agents generate fallback chains.
 - If a Concept ever gets an IEML USL: store it as annotation, never as the only id.
 - How `run-agent` names the provider capability (`ollama` / `tiiny` / `api` / `cursor-cli`) and whether Environment/Requirement from the task diagram gate `lan-only` vs remote.
 
 Those can stay experiments behind `index` / `relate` / `research`. They do not change the rule:
 
-> **ASC owns execution. Projet Complexe owns interpretation. Graphs, dumps, and IEML are mechanisms and coordinates — not a second control plane.**
+> **ASC owns execution. Projet Complexe owns interpretation. Graphs, dumps, public ontologies, and IEML are mechanisms and coordinates — not a second control plane.**
