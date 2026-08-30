@@ -1,12 +1,12 @@
 # Local dev stack architecture
 
 - **Date:** 2026-08-17
-- **Updated:** 2026-08-30 — align with revival v5 (Postgres SoR, Meilisearch first, PCA, staged Compose)
+- **Updated:** 2026-08-30 — align with revival v5 (Postgres SoR, Meilisearch first, PCA, staged Compose) and v3 extract profiles (Docling default, no Tika identity)
 - **Status:** idea / architecture note
 - **Scope:** instance layout, how the Tauri UI reaches local services, which ASC surfaces the UI may call, paging, and how those services should index heterogeneous archives
-- **Related:** [14-proposed-architecture.md](14-proposed-architecture.md) (Tauri as thin adapter; IPC primitives); [Projet Complexe 2026 Revival (v5)](../../../../../asc/data/ideas/2026/08/Projet%20Complexe%202026%20Revival%20(v5)%20-%20ASC,%20Projet%20Complexe%20and%20Projet%20Complexe%20ASC.md) (meaning vs execution, extract-once, lexical-first, three graphs)
+- **Related:** [14-proposed-architecture.md](14-proposed-architecture.md) (Tauri as thin adapter; IPC primitives); [Projet Complexe 2026 Revival (v5)](../../../../../asc/data/ideas/2026/08/Projet%20Complexe%202026%20Revival%20(v5)%20-%20ASC,%20Projet%20Complexe%20and%20Projet%20Complexe%20ASC.md) (meaning vs execution, lexical-first, three graphs); [Revival v3](../../../../../asc/data/ideas/2026/08/Projet%20Complexe%202026%20Revival%20(v3)%20-%20ASC,%20Projet%20Complexe%20and%20Projet%20Complexe%20ASC.md) (`extract` profiles: Docling default)
 
-Revival v5 references this note for the UI path and does not duplicate it. This file keeps the IPC / localhost / paging / corpus-budget story. Engine *identity* now follows v5: Solr and Arango in the 2026-08-17 draft were Compose *examples*, not the live brain.
+Revival v5 references this note for the UI path and does not duplicate it. This file keeps the IPC / localhost / paging / corpus-budget story. Engine *identity* now follows v3/v5: Solr, Arango, and always-on Tika in the 2026-08-17 draft were Compose *examples*, not the live brain. Extract profiles stay as v3 wrote them: **Docling on CPU** is the default layout Implementation.
 
 ## Goal
 
@@ -21,7 +21,7 @@ Build a **multimodal search and cross-referencing** environment over mixed local
 
 **Curation** (accept / contradict / gap) is the knowledge act. Programming assistance is a worker, not the institution. A local agent uses the **same named pivots** a human uses from the terminal.
 
-The desktop UI lives in `app/` (Tauri + Solid) when it exists. It is **secondary**: stage 1 may be terminal-only. Databases and extractors run in Docker Compose **when they exist**. ASC starts, stops, and chooses those services. **Projet Complexe ASC (PCA)** is the allowlist, packing, locale, and router policy. The UI does not become a second control plane.
+The desktop UI lives in `app/` (Tauri + Solid) when it exists. It is **secondary**: stage 1 may be terminal-only. Postgres and Meilisearch run in Docker Compose **when they exist**. Docling / OCR / ASR are **jobs**, not an always-on extractor JVM. ASC starts, stops, and chooses those services. **Projet Complexe ASC (PCA)** is the allowlist, packing, locale, and router policy. The UI does not become a second control plane.
 
 ## Three projects on one laptop
 
@@ -52,7 +52,8 @@ Same pattern as a typical Compose-based project: one **instance** repo, several 
 | `$PROJECT_DOCROOT` | Project **instance** (dev stack) |
 | `$PROJECT_DOCROOT/app` | Tauri UI piece (host app, not a Compose service) — may wait |
 | PCA under the instance (`scripts/asc/extend/…`) | Domain pivots, YAML `able`, packing, router |
-| Compose files at instance root (later) | Postgres, Meilisearch, extractors; optional pgvector in Postgres |
+| Compose files at instance root (later) | Postgres, Meilisearch; optional pgvector in Postgres |
+| ASC jobs (not always-on) | `extract` profiles: Docling (layout default), pdftotext (plain), OCR, later ASR |
 | ASC | Control plane: packages, remote host, compose lifecycle, indexing jobs |
 | Host processes (not Compose) | Ollama (tiny local models); Cursor CLI wrap; **CodeGraph SQLite sidecar** |
 
@@ -73,11 +74,14 @@ flowchart TB
     CG["CodeGraph SQLite"]
   end
 
-  subgraph engines["Compose services (when they exist)"]
-    EXTRACT["extract Implementations<br/>pdftotext / Docling / Tika"]
+  subgraph engines["Compose (when it exists)"]
     PG["Postgres SoR<br/>+ optional pgvector"]
     MEILI["Meilisearch<br/>lexical first"]
-    OCR["OCR / later ASR workers"]
+  end
+
+  subgraph jobs["ASC jobs — not always-on"]
+    EXTRACT["extract<br/>Docling layout default<br/>pdftotext plain"]
+    OCR["OCR / later ASR"]
   end
 
   APP -->|"private in-app messages"| PCA
@@ -85,7 +89,9 @@ flowchart TB
   ASC -->|"start / stop / inspect"| COMPOSE
   ASC -->|"HTTP or TCP on 127.0.0.1"| engines
   COMPOSE --> engines
+  ASC --> jobs
   ASC --> FS
+  jobs --> FS
   engines --> FS
   ASC --> OLLAMA
   ASC --> CG
@@ -323,7 +329,7 @@ flowchart LR
   end
 
   subgraph loopback["On the laptop, to Compose / host"]
-    HTTP["HTTP<br/>Meilisearch, Tika, later worker APIs"]
+    HTTP["HTTP<br/>Meilisearch, later worker APIs"]
     TCP["TCP native protocol<br/>Postgres"]
     UNIX["Unix socket<br/>Postgres optional"]
   end
@@ -343,7 +349,7 @@ flowchart LR
 | Protocol | Typical use here | Advantages | Inconvenients |
 |----------|------------------|------------|----------------|
 | **Tauri IPC** | UI ↔ Rust only | No CORS; capabilities; events + streams; UI never holds DB passwords | Not a way to talk to Meilisearch. Rust/ASC must sit in the middle. Payload size: keep messages small, point at files for big blobs. |
-| **HTTP on 127.0.0.1** | Meilisearch, Tika `/tika`, some worker APIs, later Tiiny OpenAI-compatible API on the LAN | Easy to inspect (`curl`); language-agnostic; good for extractors and search APIs | Chatty for bulk graphs; JSON cost; must not bind on all interfaces; auth still matters even on localhost. |
+| **HTTP on 127.0.0.1** | Meilisearch, later worker APIs, later Tiiny OpenAI-compatible API on the LAN | Easy to inspect (`curl`); language-agnostic; good for search APIs | Chatty for bulk graphs; JSON cost; must not bind on all interfaces; auth still matters even on localhost. Docling is a **job** that writes files, not an always-on `/tika` daemon. |
 | **TCP native protocol** | Postgres (and pgvector) | Fast, typed, transactions, prepared statements, recursive CTEs | Needs a real client (not `fetch`); version coupling; worse to debug than `curl`. |
 | **Unix socket** | Postgres alternative to TCP | Slightly faster; not a TCP port to mis-publish | Awkward from some containers; other OSes differ; still a host-local secret. |
 | **Files / directories** | Originals, canonical extracts, OCR text sidecars, embeddings dumps, static export for a public host | Right place for tens of GB of PDFs and video; ASC already thinks in paths; **SoR for bytes** | Not a query engine; need indexes *about* the files, not instead of them. |
@@ -374,7 +380,7 @@ flowchart TB
   RAW["Heterogeneous files on disk"]
 
   subgraph extract["Extract / normalize (once if possible)"]
-    IMP["Implementations behind extract:<br/>pdftotext / Docling / Tika"]
+    IMP["extract profiles:<br/>pdftotext plain · Docling layout"]
     OCR["OCR: scans, photos of pages"]
     ASR["Later ASR: audio, video soundtrack"]
     META["Sidecar YAML / JSON:<br/>path, mtime, source, licence, locale"]
@@ -410,18 +416,28 @@ Three graphs, three names:
 | **Conceptual / evidentiary** | Claims, typed Links, KnowledgeGaps | Postgres (`accepted_links`) |
 | **Code structure** | File / function / call | CodeGraph SQLite |
 
-### Extract Implementations (`extract`)
+### Extract (`extract`) — Docling default, not Tika
 
-One bounded job writes plain text + metadata. Indexes fan out. Opposite of re-parsing the book every query.
+One bounded job writes plain text + metadata. Indexes fan out. Opposite of re-parsing the book every query. One pivot; vary the **profile**, not the name (revival v3 §10.7).
 
-pdftotext, Docling, and Tika are **Implementations** behind the same pivot. Compare them; do not freeze Tika as identity.
+| Profile | Default Implementation | Writes |
+|---------|------------------------|--------|
+| **`plain`** | **pdftotext** | Canonical text. Tika only as a *guest* for odd office formats Docling/pdftotext miss. |
+| **`layout`** | **Docling on CPU** | Body, sections, tables/figures with provenance (`DoclingDocument` page/bbox). MIT, multi-format. Use when pdftotext is not enough (multi-column, captions, table regions). |
+| **`biblio`** | DOI lookup first (Crossref / OpenAlex) | Paper row. GROBID only when lookup fails — a job, not an always-on JVM. |
+| **`table`** | Docling TableFormer; Camelot/Tabula if lighter | Table JSONB / CSV sidecar. Do not flatten grids into embedding chunks. |
+| **`figure`** | Layout crop + caption; optional VLM later | Image sidecar + caption. Do not OCR every figure because Docling can. |
 
 | | |
 |--|--|
-| **Advantages** | Swap extractors without rewriting `index` or the UI; canonical files survive a dead JVM. |
-| **Inconvenients** | Quality varies (scanned PDFs need OCR, not text extractors alone); not relations; not vectors. |
+| **Advantages** | Swap extractors without rewriting `index` or the UI; canonical files survive a dead worker; CPU Docling covers mixed personal archives without a GPU identity. |
+| **Inconvenients** | Scanned PDFs still need OCR (a different worker); Marker / MinerU / Nougat only if an eval on *this* shelf wins; LlamaParse is `api-ok` overflow, never default Compose. |
 
-Apache Tika remains a convenient HTTP Compose service for many office/ebook/PDF types. It is **not** a search engine and **not** required on day one.
+**Tika is not identity.** No always-on extractor JVM next to Meilisearch. OCR/ASR/Docling are jobs that start, write, and exit.
+
+Never run GROBID + Docling + Marker + MinerU + LlamaParse on the same file “to be safe.” Pick one layout path per document class.
+
+Docling (and Marker/MinerU) must not be the SoR for “who wrote this paper.” They guess from pixels. The registry knows.
 
 ### Meilisearch (lexical / first retrieval)
 
@@ -484,7 +500,7 @@ flowchart LR
   end
 
   subgraph jobs["ASC-started workers"]
-    T["extract Implementations"]
+    T["extract: Docling / pdftotext"]
     O["OCR"]
     W["Whisper-class ASR"]
     F["ffmpeg: audio/frames from video"]
@@ -513,7 +529,8 @@ flowchart LR
 
 | Medium | Extract | Search / xref notes |
 |--------|---------|---------------------|
-| **Searchable PDF, EPUB, Word** | `extract` Implementation | Meilisearch for quotes; chunk for optional vectors; graph: bibliographic relations if HITL encodes them. Keep source language. |
+| **Searchable PDF, EPUB, Word** | `plain` (pdftotext) or `layout` (Docling) | Meilisearch for quotes; chunk for optional vectors; graph: bibliographic relations if HITL encodes them. Keep source language. |
+| **Scholarly PDF with a DOI** | `biblio` = lookup first; layout second | Auto-accept Paper/`cites` only when the registry agrees. Unresolved strings are KnowledgeGaps, not fuzzy nodes. |
 | **Scanned PDF / photo of a page** | OCR (then same as text) | OCR errors poison lexical search and embeddings; keep confidence; link image region → text block if possible. |
 | **Audio** | Transcription + timestamps (later) | Search the transcript; graph: “talks-about”; do not dump raw WAV into Meilisearch. |
 | **Video / social-media backup** | `ffmpeg` audio → ASR; optional keyframes → OCR/captions | Heavy. Budget it. Store platform metadata (caption, date, URL) as first-class, not only pixels. |
@@ -554,7 +571,7 @@ Not a Gantt chart. Inference regimes under the same pivots. Lefèvre: the world 
 
 | Stage | Engines that may exist | What must already be named |
 |-------|------------------------|----------------------------|
-| **1 — this laptop** | Files + `extract`; ripgrep or Meilisearch; Postgres when it earns its keep; Ollama 1.5–3B; Cursor CLI wrap | `extract`, `index`, `run-agent`, `research`, HITL file for proposed Claims |
+| **1 — this laptop** | Files + `extract` jobs (pdftotext / Docling); ripgrep or Meilisearch; Postgres when it earns its keep; Ollama 1.5–3B; Cursor CLI wrap | `extract`, `index`, `run-agent`, `research`, HITL file for proposed Claims |
 | **2 — Tiiny on the LAN** | Same + `provider=tiiny` | Packing still matters; `lan-only` can prefer Tiiny and forbid API |
 | **3 — other contexts** | Same pivots, nested allowlists | Do not fork the ontology for SMB |
 
@@ -573,13 +590,14 @@ Tracer-bullet: one pivot, terminal, then UI. Do not wait for a graph DB to have 
 - Conceptual graph in Postgres; code graph in CodeGraph SQLite; do not share a word.
 - Arango / Memgraph / Wikipedia dumps are not the personal graph.
 - Tauri is a thin adapter; ASC opens localhost sockets; PCA allowlists pivots.
-- Extract-once; Implementations behind `extract` are swappable.
+- Extract-once; **Docling on CPU** is the default `layout` Implementation; pdftotext is `plain`; Tika is a guest, not a Compose service.
 - fr / en / pt are Requirements on ingest / index / pack / `publish`.
 - CLI = GUI.
 
 **Still open (implementation, not identity):**
 
-- Exact Compose profiles (`postgres`, `meilisearch`, `extractors`) and port map — and whether stage 1 ships Compose at all.
+- Exact Compose profiles (`postgres`, `meilisearch`) and port map — and whether stage 1 ships Compose at all. Extractors stay jobs, not a third always-on service.
+- Whether Marker / MinerU beats Docling on *this* shelf’s formulas/tables (eval, not a second stack).
 - Which embedding model, whether it runs in Compose or on the host GPU, and the analyzer strategy for three locales (pick by evals on *this* corpus).
 - How social-media exports are ingested (folder convention vs a dedicated importer).
 - Whether interactive search uses a long-lived helper or Compose HTTP via ASC, once `make` is reserved for jobs.
