@@ -10,8 +10,14 @@ Spectral (bundled under fonts/Spectral/) and Source Code Pro
 
 Mermaid: ```mermaid blocks become live HTML (.mermaid) rendered by the
 local self-contained bundle at asc/vendor/mermaid.esm.min.mjs (IIFE,
-no CDN). Printable HTML is written under data/tmp/ so Mermaid and fonts
-load via relative paths. Markdown hrefs are left as authored.
+no CDN). KaTeX: $...$ / $$...$$ in the HTML are typeset by the local
+bundle at asc/vendor/katex/ (CSS + JS + auto-render, no CDN). Printable
+HTML is written under data/tmp/ so Mermaid, KaTeX, and fonts load via
+relative paths. Math spans are stashed before Markdown conversion so
+underscores in TeX (e.g. ``$\\mathcal{D}_{\\mathrm{train}}$``) are not eaten
+by emphasis. Local <img src> paths are rewritten from the markdown
+file's directory to that print HTML, so images next to the .md resolve
+under file://.
 
 Usage:
   asc/doc/md2pdf_asc.py input.md -o output.pdf
@@ -36,6 +42,8 @@ FONT_FAMILY = "Spectral"
 MONO_FONT_FAMILY = "Source Code Pro"
 MONO_FONT_FILE = FONTS_DIR / "SourceCodePro-Powerline-Awesome-Regular.ttf"
 MERMAID_VENDOR = ASC_DIR / "vendor" / "mermaid.esm.min.mjs"
+KATEX_VENDOR = ASC_DIR / "vendor" / "katex"
+KATEX_FILES = ("katex.min.css", "katex.min.js", "auto-render.min.js")
 # Match pdf_styles.css --asc-font-size. Mermaid sequence diagrams ignore
 # themeVariables.fontSize for actors (hardcoded 16px) unless sequence.*FontSize
 # is set — those options expect a px number, not pt.
@@ -150,6 +158,74 @@ def require_mermaid_vendor() -> Path:
     return MERMAID_VENDOR
 
 
+def require_katex_vendor() -> Path:
+    missing = [name for name in KATEX_FILES if not (KATEX_VENDOR / name).is_file()]
+    if missing or not (KATEX_VENDOR / "fonts").is_dir():
+        print(
+            f"ERROR: local KaTeX not found under {KATEX_VENDOR}\n"
+            "Expected katex.min.css, katex.min.js, auto-render.min.js, and fonts/",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return KATEX_VENDOR
+
+
+_KATEX_DELIM_RE = re.compile(r"\$\$[\s\S]+?\$\$|\$(?:\\.|[^$\n])+?\$")
+_KATEX_DISPLAY_RE = re.compile(r"\$\$[\s\S]+?\$\$")
+_KATEX_INLINE_RE = re.compile(r"(?<!\$)\$(?!\$)(?:\\.|[^$\n])+?\$(?!\$)")
+_FENCED_CODE_RE = re.compile(r"(```[\s\S]*?```)")
+# Plain-text tokens (not HTML comments): Markdown treats comments as block HTML
+# and pulls them out of <p>, which drops mid-sentence math like $x$ / $H$.
+_KATEX_PLACEHOLDER_FMT = "@@ASC_MATH_{i}@@"
+_KATEX_PLACEHOLDER_RE = re.compile(r"@@ASC_MATH_(\d+)@@")
+
+
+def html_has_katex(html: str) -> bool:
+    """True when HTML still contains $...$ or $$...$$ math delimiters."""
+    return bool(_KATEX_DELIM_RE.search(html))
+
+
+def protect_katex_math(markdown_text: str) -> tuple[str, list[str]]:
+    """Stash $...$ / $$...$$ so Markdown emphasis cannot eat TeX underscores.
+
+    Display math is wrapped in a <div> so it is not left inside a <p> (KaTeX
+    display mode is block-level; block-in-<p> breaks Chromium PDF layout).
+    """
+    placeholders: list[str] = []
+
+    def stash_inline(match: re.Match[str]) -> str:
+        placeholders.append(match.group(0))
+        return _KATEX_PLACEHOLDER_FMT.format(i=len(placeholders) - 1)
+
+    def stash_display(match: re.Match[str]) -> str:
+        placeholders.append(match.group(0))
+        tok = _KATEX_PLACEHOLDER_FMT.format(i=len(placeholders) - 1)
+        return f'\n\n<div class="asc-math-display">{tok}</div>\n\n'
+
+    parts = _FENCED_CODE_RE.split(markdown_text)
+    out: list[str] = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            out.append(part)
+            continue
+        part = _KATEX_DISPLAY_RE.sub(stash_display, part)
+        part = _KATEX_INLINE_RE.sub(stash_inline, part)
+        out.append(part)
+    return "".join(out), placeholders
+
+
+def restore_katex_math(html: str, placeholders: list[str]) -> str:
+    """Put stashed math back into HTML for KaTeX auto-render."""
+
+    def repl(match: re.Match[str]) -> str:
+        idx = int(match.group(1))
+        if 0 <= idx < len(placeholders):
+            return html_lib.escape(placeholders[idx])
+        return match.group(0)
+
+    return _KATEX_PLACEHOLDER_RE.sub(repl, html)
+
+
 def mermaid_boot_script(html_path: Path) -> str:
     """Classic script boot (IIFE vendor) — works with file:// relative src."""
     mermaid_path = require_mermaid_vendor()
@@ -212,6 +288,107 @@ def mermaid_boot_script(html_path: Path) -> str:
 """
 
 
+def katex_boot_script(html_path: Path) -> str:
+    """Local KaTeX auto-render — works with file:// relative src."""
+    katex_dir = require_katex_vendor()
+    css_rel = rel_url(html_path, katex_dir / "katex.min.css")
+    js_rel = rel_url(html_path, katex_dir / "katex.min.js")
+    auto_rel = rel_url(html_path, katex_dir / "auto-render.min.js")
+    return f"""<link rel="stylesheet" href="{css_rel}">
+<style>
+  /*
+   * Chromium PDF: KaTeX strut/vlist nesting inflates line boxes when .katex
+   * stays display:inline. Atomic inline-block keeps baseline math in-flow.
+   */
+  .katex {{
+    display: inline-block !important;
+    vertical-align: baseline;
+    line-height: 1;
+    font-size: 1.05em;
+    text-indent: 0;
+    white-space: nowrap;
+  }}
+  .katex-display {{
+    display: block !important;
+    margin: 0.55em 0;
+    text-align: center;
+    white-space: normal;
+  }}
+  .asc-math-display {{
+    margin: 0.55em 0;
+    text-align: center;
+  }}
+  .asc-math-display .katex-display {{
+    margin: 0;
+  }}
+  /* Hidden MathML still pollutes Chromium's PDF text layer / copy-paste. */
+  .katex .katex-mathml {{
+    display: none !important;
+  }}
+</style>
+<script src="{js_rel}"></script>
+<script src="{auto_rel}"></script>
+<script>
+  (function () {{
+    function ascFinishKatex() {{
+      document.querySelectorAll('.katex-mathml').forEach(function (el) {{
+        el.remove();
+      }});
+      /* auto-render wraps .katex in a bare <span>; unwrap so inline-block applies. */
+      document.querySelectorAll('.katex').forEach(function (el) {{
+        var isDisplay = el.classList.contains('katex-display')
+          || (el.parentElement && el.parentElement.classList.contains('katex-display'));
+        if (!isDisplay) {{
+          el.style.display = 'inline-block';
+          el.style.verticalAlign = 'baseline';
+          el.style.lineHeight = '1';
+          el.style.whiteSpace = 'nowrap';
+        }}
+        var parent = el.parentElement;
+        if (
+          parent
+          && parent.tagName === 'SPAN'
+          && !parent.className
+          && parent.childElementCount === 1
+          && parent.childNodes.length === 1
+        ) {{
+          parent.replaceWith(el);
+        }}
+      }});
+      var ready = (document.fonts && document.fonts.ready)
+        ? document.fonts.ready
+        : Promise.resolve();
+      ready.then(function () {{
+        window.__ascKatexDone = true;
+      }}).catch(function () {{
+        window.__ascKatexDone = true;
+      }});
+    }}
+    function ascRunKatex() {{
+      try {{
+        renderMathInElement(document.body, {{
+          delimiters: [
+            {{left: '$$', right: '$$', display: true}},
+            {{left: '$', right: '$', display: false}}
+          ],
+          throwOnError: false,
+          output: 'html'
+        }});
+      }} catch (err) {{
+        console.error('KaTeX render failed', err);
+      }}
+      ascFinishKatex();
+    }}
+    if (window.__ascMermaidReady) {{
+      window.__ascMermaidReady.then(ascRunKatex).catch(ascRunKatex);
+    }} else {{
+      ascRunKatex();
+    }}
+  }})();
+</script>
+"""
+
+
 def patch_mermaid_as_html() -> None:
     """Turn ```mermaid fences into live HTML for in-page Mermaid.js (not PNG)."""
     import md2pdf.html_renderer as hr
@@ -260,6 +437,35 @@ def print_html_path_for(source_md: Path, project_root: Path) -> Path:
     return project_root / "data" / "tmp" / "doc-print" / f"{safe}.html"
 
 
+_IMG_SRC_RE = re.compile(
+    r'(<img\b[^>]*?\bsrc=)(["\'])([^"\']+)\2',
+    re.IGNORECASE,
+)
+
+
+def rewrite_local_img_srcs(html: str, source_md: Path, html_path: Path) -> str:
+    """Point <img src> at files relative to print HTML, not the .md."""
+    md_dir = source_md.resolve().parent
+    html_dir = html_path.resolve().parent
+
+    def repl(match: re.Match[str]) -> str:
+        prefix, quote, src = match.group(1), match.group(2), match.group(3)
+        if src.startswith(("http://", "https://", "data:", "file:", "#")):
+            return match.group(0)
+        raw = Path(src)
+        target = raw if raw.is_absolute() else (md_dir / src)
+        try:
+            target = target.resolve()
+        except OSError:
+            return match.group(0)
+        if not target.is_file():
+            return match.group(0)
+        rel = Path(os.path.relpath(target, start=html_dir)).as_posix()
+        return f"{prefix}{quote}{rel}{quote}"
+
+    return _IMG_SRC_RE.sub(repl, html)
+
+
 def patch_html_renderer() -> None:
     import md2pdf.html_renderer as hr
 
@@ -269,7 +475,10 @@ def patch_html_renderer() -> None:
 
     def markdown_to_html(markdown_text: str, title: str = "Document",
                          enable_mermaid: bool = True) -> str:
-        html = orig(markdown_text, title=title, enable_mermaid=enable_mermaid)
+        # Protect math before Python-Markdown turns _…_ into <em>.
+        protected, katex_placeholders = protect_katex_math(markdown_text)
+        html = orig(protected, title=title, enable_mermaid=enable_mermaid)
+        html = restore_katex_math(html, katex_placeholders)
         html_path = _PRINT_HTML_PATH
         if html_path is None:
             raise RuntimeError("Internal error: print HTML path not set")
@@ -283,12 +492,18 @@ def patch_html_renderer() -> None:
         )
         if n != 1:
             raise RuntimeError("Failed to replace md2pdf embedded <style> block")
+        boot = ""
         if enable_mermaid and 'class="mermaid"' in html2:
+            boot += mermaid_boot_script(html_path)
+        if html_has_katex(html2):
+            boot += katex_boot_script(html_path)
+        if boot:
             if "</body>" not in html2:
-                raise RuntimeError("HTML missing </body>; cannot inject Mermaid")
-            html2 = html2.replace(
-                "</body>", mermaid_boot_script(html_path) + "</body>", 1
-            )
+                raise RuntimeError("HTML missing </body>; cannot inject scripts")
+            html2 = html2.replace("</body>", boot + "</body>", 1)
+        source_md = _CURRENT_SOURCE_MD
+        if source_md is not None:
+            html2 = rewrite_local_img_srcs(html2, source_md, html_path)
         return html2
 
     hr.markdown_to_html = markdown_to_html
@@ -333,6 +548,7 @@ def patch_html_renderer() -> None:
             }
 
             has_mermaid = 'class="mermaid"' in html_content
+            has_katex = "auto-render.min.js" in html_content
             # Playwright requires a URL; derived from project-local HTML only.
             goto_url = html_path.resolve().as_uri()
 
@@ -353,7 +569,20 @@ def patch_html_renderer() -> None:
                         }""",
                         timeout=60000,
                     )
-                else:
+                if has_katex:
+                    await page.wait_for_function(
+                        """() => window.__ascKatexDone === true""",
+                        timeout=60000,
+                    )
+                    # Ensure KaTeX webfonts are applied before print.
+                    await page.evaluate(
+                        """async () => {
+                          if (document.fonts && document.fonts.ready) {
+                            await document.fonts.ready;
+                          }
+                        }"""
+                    )
+                elif not has_mermaid:
                     await page.wait_for_load_state("networkidle")
                 await page.pdf(**pdf_options)
                 await browser.close()
@@ -412,6 +641,7 @@ def main() -> int:
         return 1
 
     require_mermaid_vendor()
+    require_katex_vendor()
 
     if Path.home().joinpath(".cache/ms-playwright").is_dir():
         os.environ.setdefault(
@@ -433,7 +663,8 @@ def main() -> int:
     print(
         f"  (ASC style: {FONT_FAMILY} + {MONO_FONT_FAMILY} + compact 8pt; "
         f"Mermaid local {MERMAID_VENDOR.relative_to(_PROJECT_ROOT)}; "
-        "links as authored)"
+        f"KaTeX local {KATEX_VENDOR.relative_to(_PROJECT_ROOT)}; "
+        "local images rewritten for print HTML)"
     )
     try:
         result = convert_markdown_to_pdf_html(
