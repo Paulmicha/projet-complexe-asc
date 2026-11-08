@@ -4,16 +4,16 @@
 # Docker-compose single service "run" operation.
 #
 # @example
-#   make service-run 'arangodb' 'bash'
+#   make service-run 'arcadedb' 'bash'
 #   # Or :
-#   asc/extensions/compose/service/run.sh 'arangodb' 'bash'
+#   asc/extensions/compose/service/run.sh 'arcadedb' 'bash'
 #
 
 . asc/bootstrap.sh
 
-a_service="$1"
+p_service="$1"
 
-if [[ -z "$a_service" ]]; then
+if [[ -z "$p_service" ]]; then
   echo >&2
   echo "Error in $BASH_SOURCE line $LINENO: service name is required." >&2
   echo "-> Aborting (1)." >&2
@@ -23,4 +23,4 @@ fi
 
 shift 1
 
-docker compose run "$a_service" $@
+docker compose run "$p_service" $@

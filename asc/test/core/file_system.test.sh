@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+
+##
+# ASC core file system related tests.
+#
+# @requires asc/vendor/shunit2
+#
+# This file may be dynamically executed.
+# @see asc/test/core.sh
+#
+# @example
+#   asc/test/asc/fsop.test.sh
+#
+
+. asc/bootstrap.sh
+. asc/core/utils/fs_compression.manual-inc.sh
+. asc/core/utils/fs_sync.manual-inc.sh
+
+##
+# Archive helpers must not load from kernel `fs.manual-inc.sh` (nested bootstrap).
+# Callers source `fs_compression.manual-inc.sh` and `fs_sync.manual-inc.sh`.
+# `f_fs_watch_poll` is dropped.
+# @see changelog/2026/09/19-fs-archive-lazy-include.md
+#
+test_f_fs_archive_helpers_absent_from_kernel_bootstrap() {
+  local out
+  out="$(bash -c '. asc/bootstrap.sh
+printf "%s" "$(type -t f_fs_compress)"
+printf " %s" "$(type -t f_fs_extract)"
+printf " %s" "$(type -t f_fs_merge_dirs)"
+printf " %s" "$(type -t f_fs_watch_poll)"')"
+  assertEquals 'compress/extract/merge/watch_poll unset after kernel bootstrap' \
+    '   ' "$out"
+}
+
+##
+# Can ASC create directories in current dir ?
+#
+# @evol see asc/vendor/shunit2/examples/mkdir_test.sh
+#
+test_asc_can_create_dir() {
+  mkdir '_asc_dir_test'
+  assertTrue 'Directory missing (creation test failed)' "[ -d '_asc_dir_test' ]"
+}
+
+##
+# Can ASC change permissions ?
+#
+test_asc_can_chmod() {
+  local rtrn
+  chmod 700 '_asc_dir_test'
+  rtrn=$?
+  assertEquals 'Chmod failed (returned non-zero code)' 0 $rtrn
+}
+
+##
+# Can ASC create files in current dir ?
+#
+test_asc_can_create_file() {
+  touch '_asc_dir_test/_asc_file_test.txt'
+  assertTrue 'File missing (creation test failed)' "[ -f '_asc_dir_test/_asc_file_test.txt' ]"
+}
+
+##
+# Can ASC change ownership ?
+# Update : removed (would require sudoing, not enforceable).
+#
+# test_asc_can_chown() {
+#   local rtrn
+#   chown 81:81 '_asc_dir_test/_asc_file_test.txt'
+#   rtrn=$?
+#   assertEquals 'Chown failed (returned non-zero code)' 0 $rtrn
+# }
+
+##
+# f_fs_get_file_contents must load exact file bytes into a caller var.
+#
+test_f_fs_get_file_contents() {
+  mkdir -p '_asc_dir_test'
+  local f='_asc_dir_test/get_file_contents.txt'
+  local got=''
+  local expected=$'alpha\nbeta gamma\n'
+
+  printf '%s' "$expected" > "$f"
+  f_fs_get_file_contents "$f" 'got'
+  assertEquals 'f_fs_get_file_contents should preserve contents.' "$expected" "$got"
+
+  printf 'no-trailing-newline' > "$f"
+  f_fs_get_file_contents "$f" 'got'
+  assertEquals 'f_fs_get_file_contents should preserve missing final newline.' \
+    'no-trailing-newline' "$got"
+
+  assertFalse 'missing file should fail.' \
+    "f_fs_get_file_contents '_asc_dir_test/missing.txt' 'got' 2>/dev/null"
+}
+
+##
+# f_fs_relative_path must compute paths without forking dirname.
+#
+test_f_fs_relative_path() {
+  relative_path=''
+  f_fs_relative_path '/var/www/html/yetetets/testtset/fdsf.fd' '/var/www/html'
+  assertEquals 'child under source' 'yetetets/testtset/fdsf.fd' "$relative_path"
+
+  relative_path=''
+  f_fs_relative_path '/' '/var/www/html'
+  assertEquals 'root from nested source' '../../../' "$relative_path"
+
+  relative_path=''
+  f_fs_relative_path '/var/www/yetetets/testtset/fdsf.fd' '/opt/app'
+  assertEquals 'sibling trees' '../../var/www/yetetets/testtset/fdsf.fd' "$relative_path"
+
+  relative_path=''
+  f_fs_relative_path 'data/db-dumps/foo.sql' '/project'
+  assertEquals 'project-relative target' 'data/db-dumps/foo.sql' "$relative_path"
+}
+
+##
+# Dir / file listing (depth 1 bash path) and most-recent lookup.
+#
+test_f_fs_dir_file_list_and_most_recent() {
+  mkdir -p '_asc_dir_test/list/sub'
+  touch '_asc_dir_test/list/a.txt' '_asc_dir_test/list/b.sh' '_asc_dir_test/list/sub/c.txt'
+  sleep 0.05
+  touch '_asc_dir_test/list/b.sh'
+
+  mkdir -p '_asc_dir_test/list/sub dir'
+  f_fs_dir_list '_asc_dir_test/list'
+  local dir_hit=0
+  local d
+  for d in "${dir_list_arr[@]}"; do
+    if [[ "$d" == 'sub dir' ]]; then
+      dir_hit=1
+    fi
+  done
+  assertEquals 'dir_list_arr keeps a space' '1' "$dir_hit"
+
+  f_fs_file_list '_asc_dir_test/list' '*.sh'
+  assertEquals 'file_list_arr length for *.sh' '1' "${#file_list_arr[@]}"
+  assertEquals 'file_list_arr is b.sh' 'b.sh' "${file_list_arr[0]}"
+
+  local most_recent=''
+  f_fs_get_most_recent '_asc_dir_test/list' '' 1 1 'most_recent'
+  assertTrue 'most recent should be b.sh' "[[ \"$most_recent\" == *b.sh ]]"
+}
+
+##
+# f_fs_file_list_append must accumulate paths, including names with spaces.
+#
+test_f_fs_file_list_append() {
+  mkdir -p '_asc_dir_test/append/sub dir'
+  touch '_asc_dir_test/append/a.pdf' \
+    '_asc_dir_test/append/my file.md' \
+    '_asc_dir_test/append/skip.txt' \
+    '_asc_dir_test/append/sub dir/nested.pdf'
+
+  file_list='sentinel'
+  file_list_arr=('keep')
+  f_fs_file_list_append '_asc_dir_test/missing' '*.pdf'
+  assertEquals 'missing dir leaves prior entries' '1' "${#file_list_arr[@]}"
+  assertEquals 'missing dir leaves the prior path' 'keep' "${file_list_arr[0]}"
+
+  file_list_arr=()
+  f_fs_file_list_append '_asc_dir_test/append' '*.pdf'
+  f_fs_file_list_append '_asc_dir_test/append' '*.md'
+  assertEquals 'two patterns append' '2' "${#file_list_arr[@]}"
+  assertEquals 'pdf stays one element' 'a.pdf' "${file_list_arr[0]}"
+  assertEquals 'md name keeps its space' 'my file.md' "${file_list_arr[1]}"
+  assertEquals 'file_list is left alone' 'sentinel' "$file_list"
+
+  file_list_arr=()
+  f_fs_file_list_append '_asc_dir_test/append' '*.pdf' 2
+  local hit=0
+  local f
+  for f in "${file_list_arr[@]}"; do
+    if [[ "$f" == 'sub dir/nested.pdf' ]]; then
+      hit=1
+    fi
+  done
+  assertEquals 'deeper path keeps its space' '1' "$hit"
+}
+
+##
+# Merge dirs, change_line, trim compression extension.
+#
+test_f_fs_merge_change_trim() {
+  mkdir -p '_asc_dir_test/merge_src/nested' '_asc_dir_test/merge_dst'
+  echo 'from-src' > '_asc_dir_test/merge_src/nested/item.txt'
+  echo 'keep' > '_asc_dir_test/merge_dst/keep.txt'
+
+  f_fs_merge_dirs '_asc_dir_test/merge_src' '_asc_dir_test/merge_dst' 'yes' 'yes'
+  assertTrue 'merged nested file' "[ -f '_asc_dir_test/merge_dst/nested/item.txt' ]"
+  assertFalse 'source removed after merge' "[ -d '_asc_dir_test/merge_src' ]"
+  assertEquals 'merged content' 'from-src' "$(<'_asc_dir_test/merge_dst/nested/item.txt')"
+
+  echo 'OLD line value' > '_asc_dir_test/change_line.txt'
+  f_fs_change_line 'OLD' 'NEW line value' '_asc_dir_test/change_line.txt'
+  assertEquals 'change_line' 'NEW line value' "$(<'_asc_dir_test/change_line.txt')"
+
+  local uncompressed_file=''
+  f_fs_trim_compression_ext 'path/to/dump.sql.gz'
+  assertEquals 'trim .gz' 'path/to/dump.sql' "$uncompressed_file"
+  f_fs_trim_compression_ext 'archive.tar.gz' 'uncompressed_file'
+  assertEquals 'trim .tar.gz' 'archive' "$uncompressed_file"
+}
+
+##
+# f_fs_compress / f_fs_extract (folder arg = containing dir of the leaf).
+#
+test_f_fs_compress_and_extract() {
+  mkdir -p '_asc_dir_test/archive_src' '_asc_dir_test/extract_dst'
+  echo 'payload' > '_asc_dir_test/archive_src/payload.txt'
+
+  # compress "$leaf_path" "$parent_dir" → tar -C "$parent_dir" … "$leaf"
+  f_fs_compress '_asc_dir_test/archive_src' '_asc_dir_test'
+  assertTrue 'compress should create tgz in parent' \
+    "[ -f '_asc_dir_test/archive_src.tgz' ]"
+
+  f_fs_extract '_asc_dir_test/archive_src.tgz' '_asc_dir_test/extract_dst'
+  assertTrue 'extract should restore payload under archive leaf dir' \
+    "[ -f '_asc_dir_test/extract_dst/archive_src/payload.txt' ]"
+}
+
+##
+# Preferred extension `gz` on a file is gzip of that file, not tar.gz bytes.
+#
+test_f_fs_compress_gz_is_gzip_not_tar() {
+  mkdir -p '_asc_dir_test/gz'
+  printf '%s' 'SELECT 1;' > '_asc_dir_test/gz/dump.sql'
+
+  f_fs_compress '_asc_dir_test/gz/dump.sql' '_asc_dir_test/gz' 'gz'
+  assertTrue 'creates dump.sql.gz' "[ -f '_asc_dir_test/gz/dump.sql.gz' ]"
+  assertTrue 'must be gzip' "gzip -t '_asc_dir_test/gz/dump.sql.gz'"
+  assertEquals 'gzip -dc is the SQL file, not a tar member' \
+    'SELECT 1;' "$(gzip -dc '_asc_dir_test/gz/dump.sql.gz')"
+
+  rm -f '_asc_dir_test/gz/dump.sql'
+  f_fs_extract_in_place '_asc_dir_test/gz/dump.sql.gz'
+  assertEquals 'round-trip SQL' 'SELECT 1;' "$(<'_asc_dir_test/gz/dump.sql')"
+}
+
+##
+# Cleans up any leftovers from previous tests.
+#
+# (Internal shunit2 function called after all tests have run.)
+#
+oneTimeTearDown() {
+  rm -fr '_asc_dir_test'
+}
+
+# Load and run shUnit2.
+. asc/vendor/shunit2/shunit2

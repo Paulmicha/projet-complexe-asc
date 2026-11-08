@@ -3,7 +3,7 @@
 ##
 # Upload DB dump on remote.
 #
-# @see data/asc/remote-instances/${a_remote_id}.sh
+# @see data/asc/cache/entities/remote_instance/${p_remote_id}.sh
 # @see f_remote_instances_setup() in asc/extensions/remote/remote.inc.sh
 #
 # @param 1 String : destination remote host ID.
@@ -108,7 +108,7 @@ for key in "${!dumps_dict[@]}"; do
   # When no local_file is provided, get most recent dump file in local dir
   # corresponding to the DB ID.
   if [[ -z "$local_file" ]]; then
-    local_file="$(f_fs_get_most_recent $local_dir '*.gz')"
+    f_fs_get_most_recent "$local_dir" '*.gz' '' '' 'local_file'
   fi
 
   # Debug.

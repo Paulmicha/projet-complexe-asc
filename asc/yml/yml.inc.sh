@@ -3,8 +3,9 @@
 ##
 # YAML-related utility functions.
 #
-# This file is sourced during core ASC bootstrap.
+# Eager via ASC_INC (`asc/yml` is an active dir). Not a kernel include.
 # @see asc/bootstrap.sh
+# @see changelog/2026/09/19-lazy-opt-inc-remaining-core-waves.md
 #
 # Convention : functions names are all prefixed by "f".
 #
@@ -22,6 +23,9 @@
 #
 # @param 1 String : path to YAML file.
 # @param 2 [optional] String : the resulting variables prefix. Defaults to 'y_'.
+# @param 3 [optional] String : output var name. When set, writes assignment
+#   text via printf -v (no caller capture subshell). When omitted, prints to
+#   stdout. Vendor parse_yaml still uses a sed/awk pipeline internally.
 #
 # @example
 #   # Given this input file contents (path/to/file.yml) :
@@ -40,9 +44,9 @@
 #       content: Item 3 content
 #
 #   # Calling this :
-#   f_yaml_parse path/to/file.yml 'conf_'
+#   f_yaml_parse path/to/file.yml 'conf_' 'parsed'
 #
-#   # -> outputs :
+#   # -> $parsed contains :
 #   conf_site_all=("default-sites.txt")
 #   conf_site_new=("new-sites.txt")
 #   conf_urls+=("preprod.example.com")
@@ -55,7 +59,8 @@
 #   conf_items__content+=("Item 3 content")
 #
 #   # Usage example :
-#   eval "$(f_yaml_parse path/to/file.yml 'conf_')"
+#   f_yaml_parse path/to/file.yml 'conf_' 'parsed'
+#   eval "$parsed"
 #   echo "$conf_site_all"             # -> default-sites.txt
 #   echo "$conf_site_new"             # -> new-sites.txt
 #   echo "${conf_urls[0]}"            # -> preprod.example.com
@@ -83,16 +88,21 @@
 #   # @see f_remote_instances_setup() in asc/extensions/remote/remote.inc.sh
 #
 f_yaml_parse() {
-  local a_yml_file="$1"
-  local a_prefix="$2"
+  local p_yml_file="$1"
+  local p_prefix="$2"
+  local p_output_var_name="${3:-}"
 
-  if [[ -z "$a_prefix" ]]; then
-    a_prefix='y_'
+  if [[ -z "$p_prefix" ]]; then
+    p_prefix='y_'
   else
-    f_str_sanitize_var_name "$a_prefix" a_prefix
+    f_str_sanitize_var_name "$p_prefix" p_prefix
   fi
 
-  parse_yaml "$a_yml_file" "$a_prefix"
+  if [[ -n "$p_output_var_name" ]]; then
+    printf -v "$p_output_var_name" '%s' "$(parse_yaml "$p_yml_file" "$p_prefix")"
+  else
+    parse_yaml "$p_yml_file" "$p_prefix"
+  fi
 }
 
 ##
@@ -117,11 +127,9 @@ f_yaml_parse() {
 #   done
 #
 f_yaml_get_root_keys() {
-  local a_yaml_file="$1"
+  local p_yaml_file="$1"
   local parsed_line
   local parsed_var
-  local parsed_var_leaf
-  local parsed_var_split
 
   yaml_keys_arr=()
 
@@ -139,13 +147,13 @@ f_yaml_get_root_keys() {
         continue
         ;;
     esac
-  done < "$a_yaml_file"
+  done < "$p_yaml_file"
 }
 
 ##
 # Gets "keys" from given parsed YAML string filtered by prefix.
 #
-# Warning : for rrot (level 0) keys_arr, use f_yaml_get_root_keys().
+# Warning : for root (level 0) keys_arr, use f_yaml_get_root_keys().
 #
 # For now, only works with "non-list" entries.
 # @see f_yaml_parse()
@@ -159,7 +167,7 @@ f_yaml_get_root_keys() {
 #
 # @example
 #   # Level 1 keys of 'site' from the f_yaml_parse() example file contents :
-#   parsed_yaml_str="$(f_yaml_parse path/to/file.yml 'conf_')"
+#   f_yaml_parse path/to/file.yml 'conf_' 'parsed_yaml_str'
 #   f_yaml_get_keys "$parsed_yaml_str" 'conf_site_'
 #   echo "Level 1 'site' keys = ${yaml_keys_arr[@]}"
 #   echo "Number of level 1 'site' keys = ${#yaml_keys_arr[@]}"
@@ -169,8 +177,8 @@ f_yaml_get_root_keys() {
 #   done
 #
 f_yaml_get_keys() {
-  local a_yaml_str="$1"
-  local a_prefix="$2"
+  local p_yaml_str="$1"
+  local p_prefix="$2"
   local parsed_line
   local parsed_var
   local parsed_var_leaf
@@ -181,20 +189,20 @@ f_yaml_get_keys() {
   while IFS= read -r parsed_line _; do
     parsed_var_leaf="=${parsed_line##*=}"
     parsed_var="${parsed_line%$parsed_var_leaf}"
-    if [[ -n "$a_prefix" ]]; then
+    if [[ -n "$p_prefix" ]]; then
       # Skip any line not matching prefix.
       case "$parsed_line" in
-        "$a_prefix"*)
-          parsed_var="${parsed_var#$a_prefix}"
+        "$p_prefix"*)
+          parsed_var="${parsed_var#$p_prefix}"
           ;;
         *)
           continue
           ;;
       esac
     fi
-    parsed_var_split="$(echo "$parsed_var" | cut -d '_' -f 1)"
+    parsed_var_split="${parsed_var%%_*}"
     f_array_add_once "$parsed_var_split" yaml_keys_arr
-  done <<< "$a_yaml_str"
+  done <<< "$p_yaml_str"
 }
 
 ##
@@ -217,16 +225,16 @@ f_yaml_get_keys() {
 #   echo "$my_esc"
 #
 f_yaml_escape_double() {
-  local a_val="$1"
-  local a_var_name="$2"
+  local p_val="$1"
+  local p_var_name="$2"
 
-  if [[ -z "$a_var_name" ]]; then
-    a_var_name='yaml_escaped'
+  if [[ -z "$p_var_name" ]]; then
+    p_var_name='yaml_escaped'
   fi
 
-  a_val="${a_val//'\'/'\\'}"
-  a_val="${a_val//\"/\\\"}"
-  printf -v "$a_var_name" '%s' "$a_val"
+  p_val="${p_val//'\'/'\\'}"
+  p_val="${p_val//\"/\\\"}"
+  printf -v "$p_var_name" '%s' "$p_val"
 }
 
 ##
@@ -247,9 +255,9 @@ f_yaml_escape_double() {
 #   f_yaml_write 'data/threads/foo.yml' y_sc_dict y_keys tree y_tree
 #
 f_yaml_write() {
-  local a_yml_file="$1"
-  local a_scalars_name="$2"
-  local a_keys_name="$3"
+  local p_yml_file="$1"
+  local p_scalars_name="$2"
+  local p_keys_name="$3"
   local yaml_dir
   local k
   local list_key
@@ -260,12 +268,12 @@ f_yaml_write() {
 
   shift 3
 
-  declare -n __yaml_scalars_dict_nameref="$a_scalars_name"
-  declare -n __yaml_keys_arr_nameref="$a_keys_name"
+  declare -n __yaml_scalars_dict_nameref="$p_scalars_name"
+  declare -n __yaml_keys_arr_nameref="$p_keys_name"
 
-  yaml_dir="${a_yml_file%/*}"
+  yaml_dir="${p_yml_file%/*}"
 
-  if [[ "$yaml_dir" != "$a_yml_file" && ! -d "$yaml_dir" ]]; then
+  if [[ "$yaml_dir" != "$p_yml_file" && ! -d "$yaml_dir" ]]; then
     mkdir -p "$yaml_dir"
   fi
 
@@ -287,5 +295,5 @@ f_yaml_write() {
     done
   done
 
-  printf '%s' "$yaml_buf" > "$a_yml_file"
+  printf '%s' "$yaml_buf" > "$p_yml_file"
 }

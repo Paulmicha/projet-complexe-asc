@@ -7,9 +7,20 @@
 #   -> 'data/ideas/2026/08/Agents of Redirection (Donella Meadows, Alexandre Monnin, Pierre Lévy).pdf'
 #
 # @requires https://github.com/rbutinar/md2pdf-mermaid
-# Styled via asc/doc/md2pdf_asc.py + pdf_styles.css (Spectral, compact 8pt).
+# Styled via asc/doc/md2pdf_asc.py + pdf_styles.css (Spectral, 9pt body).
 # Mermaid: local asc/vendor/mermaid.esm.min.mjs (offline).
 # KaTeX: local asc/vendor/katex/ (CSS + JS + auto-render, offline).
+# Graphviz: ```dot / ```graphviz / ```fdp / …  (user host dep: sudo apt install graphviz)
+# Optional edge-label pass: ```dot labels  →  dot -Tdot | gvpr | neato -n2 -Tsvg
+# (falls back to dot -Tsvg if gvpr/neato missing or the improve pass fails).
+# Default fences stay on dot -K<engine> -Tsvg.
+# Missing `dot` never aborts export. Each Graphviz fence becomes pre.graphviz-error
+# plus a stderr warning (including when every fence failed).
+#
+# Print pipeline (do not reorder; heading/table pagination is last):
+#   protect math → Graphviz fences→SVG → markdown → restore math → explode code
+#   → inject CSS/boot → fonts → Mermaid → KaTeX flatten → emulate print
+#   → mark long paragraphs → paginate orphans/widows → page.pdf
 #
 # @param n [optional] String : any additional named option.
 #   --force (flag) : Force re-compiling already compiled pdfs. By default, only
@@ -23,7 +34,7 @@
 #   asc/doc/pdf_export.sh --force
 #
 #   # Single file :
-#   asc/doc/pdf_export.sh 'data/ideas/2026/08/Agents of Redirection (Donella Meadows, Alexandre Monnin, Pierre Lévy).md'
+#   asc/doc/pdf_export.sh 'data/ideas/2026/08/Agents of Redirection.md'
 #   asc/doc/pdf_export.sh --force 'docs/asc/builder.md'
 #
 #   # All *.md files under a folder (recursive) :
@@ -116,32 +127,10 @@ if [[ ! -f "asc/vendor/katex/katex.min.js" ]]; then
   exit 1
 fi
 
-# True if path is under data/ideas or docs (relative or absolute).
-doc_under_export_roots() {
-  local p="$1" abs
-  p="${p#./}"
-  p="${p%/}"
-  case "$p" in
-    data/ideas|data/ideas/*|docs|docs/*) return 0 ;;
-  esac
-  if [[ -e "$p" ]]; then
-    if [[ -d "$p" ]]; then
-      abs="$(cd "$p" && pwd)"
-    else
-      abs="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
-    fi
-    case "$abs" in
-      "$PWD/data/ideas"|"$PWD/data/ideas/"*|"$PWD/docs"|"$PWD/docs/"*) return 0 ;;
-    esac
-  fi
-  return 1
-}
-
 doc_is_exportable_md() {
   local p_md="$1"
   [[ -f "$p_md" ]] || return 1
   [[ "${p_md##*.}" == 'md' ]] || return 1
-  doc_under_export_roots "$p_md"
 }
 
 doc_md_to_pdf() {
@@ -188,10 +177,6 @@ if [[ -n "$p_target" ]]; then
   p_target="${p_target#./}"
   p_target="${p_target%/}"
   if [[ -d "$p_target" ]]; then
-    if ! doc_under_export_roots "$p_target"; then
-      echo "Expected a folder under data/ideas/ or docs/: $p_target"
-      exit 1
-    fi
     doc_pdf_export_tree "$p_target" || exit $?
   elif [[ -f "$p_target" ]]; then
     if ! doc_is_exportable_md "$p_target"; then

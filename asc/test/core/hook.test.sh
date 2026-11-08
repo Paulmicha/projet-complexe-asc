@@ -17,7 +17,10 @@
 #
 
 . asc/bootstrap.sh
-. asc/test/test.inc.sh
+if [[ "$(type -t f_test_batch_exec)" != function ]]; then
+  # shellcheck disable=SC1091
+  . asc/test/test.opt-inc.sh
+fi
 
 ##
 # Creates temporary files for verification purposes in current test case.
@@ -27,7 +30,7 @@ oneTimeSetUp() {
 
   # Clear dry-run hook caches so newly touched files are visible.
   # @see hook() in asc/utilities/hook.sh
-  rm -f data/asc/cache/hook.*nftaschhnc*
+  rm -f data/asc/cache/hook/*nftaschhnc*
 
   for s in $ASC_SUBJECTS; do
     # bootstrap/ holds phase includes, not a normal subject action namespace.
@@ -109,7 +112,7 @@ asc/extensions/nftaschdehnc/test/nftaschhnc_dry_run.$INSTANCE_TYPE.hook.sh
 asc/extensions/nftaschdehnc/stack/nftaschhnc_dry_run.hook.sh
 "
 
-  rm -f data/asc/cache/hook.*nftaschhnc*
+  rm -f data/asc/cache/hook/*nftaschhnc*
   hook -a 'nftaschhnc_dry_run' -t
 
   f_test_compare_expected_lookup_paths
@@ -124,7 +127,7 @@ test_asc_hook_subject() {
   local expected_list="asc/test/nftaschhnc_dry_run.hook.sh
 asc/extensions/nftaschdehnc/test/nftaschhnc_dry_run.$INSTANCE_TYPE.hook.sh"
 
-  rm -f data/asc/cache/hook.*nftaschhnc*
+  rm -f data/asc/cache/hook/*nftaschhnc*
   hook -a 'nftaschhnc_dry_run' -s 'test' -t
 
   f_test_compare_expected_lookup_paths
@@ -141,7 +144,7 @@ asc/extensions/nftaschdehnc/test/nftaschhnc_dry_run.$HOST_TYPE.$INSTANCE_TYPE.ho
 asc/extensions/nftaschdehnc/test/nftaschhnc_dry_run.$HOST_TYPE.hook.sh
 "
 
-  rm -f data/asc/cache/hook.*nftaschhnc*
+  rm -f data/asc/cache/hook/*nftaschhnc*
   hook -a 'nftaschhnc_dry_run' -s 'test' -e 'nftaschdehnc' -v 'HOST_TYPE INSTANCE_TYPE' -t
 
   f_test_compare_expected_lookup_paths
@@ -155,7 +158,7 @@ test_asc_hook_prefix() {
   local hook_dry_run_matches=''
   local expected_list="asc/extensions/nftaschdehnc/test/pre_nftaschhnc_dry_run.hook.sh"
 
-  rm -f data/asc/cache/hook.*nftaschhnc*
+  rm -f data/asc/cache/hook/*nftaschhnc*
   hook -a 'nftaschhnc_dry_run' -p 'pre' -t
 
   f_test_compare_expected_lookup_paths
@@ -171,7 +174,7 @@ test_asc_hook_prefix_variants() {
 asc/extensions/nftaschdehnc/test/post_nftaschhnc_dry_run.$INSTANCE_TYPE.hook.sh
 "
 
-  rm -f data/asc/cache/hook.*nftaschhnc*
+  rm -f data/asc/cache/hook/*nftaschhnc*
   hook -a 'nftaschhnc_dry_run' -s 'test' -e 'nftaschdehnc' -p 'post' -t
 
   f_test_compare_expected_lookup_paths
@@ -185,11 +188,530 @@ test_asc_hook_prefix_combinatory_variants() {
   local hook_dry_run_matches=''
   local expected_list="asc/extensions/nftaschdehnc/test/undo_nftaschhnc_dry_run.$HOST_TYPE.$INSTANCE_TYPE.hook.sh"
 
-  rm -f data/asc/cache/hook.*nftaschhnc*
+  rm -f data/asc/cache/hook/*nftaschhnc*
   hook -a 'nftaschhnc_dry_run' -s 'test' -v 'HOST_TYPE INSTANCE_TYPE' -p 'undo' -t
 
   f_test_compare_expected_lookup_paths
   f_test_lookup_paths_assertion "Prefix + combinatory variants filter hook test failed." $flag
+}
+
+##
+# Canonical hook cache key: parsed flags, variant values, no -d / -w.
+#
+test_f_hook_cache_key_canonical() {
+  local o_subjects_filter='site instance'
+  local o_actions_filter='fs_perms_set'
+  local o_prefixes_filter='pre'
+  local o_variants_filter='STACK_VERSION HOST_TYPE INSTANCE_TYPE'
+  local o_extensions_filter=''
+  local o_custom_filter=''
+  local b_debug=1
+  local b_dry_run=0
+  local b_root_lookup=0
+  local b_cache_warmup=1
+  local hook_cache_key=''
+
+  f_hook_cache_key
+  assertEquals 'canonical key from parsed flags' \
+    "s-site,instance.a-fs_perms_set.p-pre.v-${STACK_VERSION},${HOST_TYPE},${INSTANCE_TYPE}" \
+    "$hook_cache_key"
+}
+
+##
+# Dry-run and root-lookup stay in the key; debug and warmup do not.
+#
+test_f_hook_cache_key_flags() {
+  local o_subjects_filter=''
+  local o_actions_filter='global'
+  local o_prefixes_filter=''
+  local o_variants_filter=''
+  local o_extensions_filter=''
+  local o_custom_filter='vars.sh'
+  local b_debug=1
+  local b_dry_run=1
+  local b_root_lookup=1
+  local b_cache_warmup=1
+  local hook_cache_key=''
+
+  f_hook_cache_key
+  assertEquals 'custom + t + r; no d/w' 'a-global.c-vars.sh.t.r' "$hook_cache_key"
+}
+
+##
+# Same -s/-a/-v with and without -d or -w share one cache file.
+#
+test_hook_cache_debug_and_warmup_share_file() {
+  local n1
+  local n2
+
+  rm -f data/asc/cache/hook/*nftaschhnc*
+  hook -a 'nftaschhnc_dry_run' -s 'test' -t
+  n1=$(find data/asc/cache/hook -name '*nftaschhnc*' 2>/dev/null | wc -l)
+
+  hook -a 'nftaschhnc_dry_run' -s 'test' -t -d
+  hook -a 'nftaschhnc_dry_run' -s 'test' -t -w
+  n2=$(find data/asc/cache/hook -name '*nftaschhnc*' 2>/dev/null | wc -l)
+
+  assertEquals 'one cache file for the match set' '1' "$(echo "$n1" | tr -d ' ')"
+  assertEquals '-d and -w must not add cache files' "$n1" "$n2"
+}
+
+##
+# A warmup hit must not source the cached hook body.
+#
+test_hook_cache_warmup_hit_skips_body() {
+  local action='nftaschw'
+  local hook_file="asc/test/${action}.hook.sh"
+  local marker="data/asc/${action}_marker.txt"
+  local lines
+  local n_cache
+
+  rm -f data/asc/cache/hook/*"${action}"* "$marker" "$hook_file"
+  mkdir -p data/asc
+  printf '%s\n' "printf '%s\n' ran >> ${marker}" > "$hook_file"
+
+  hook -a "$action" -s 'test'
+  lines=0
+  if [[ -f "$marker" ]]; then
+    lines="$(wc -l < "$marker" | tr -d ' ')"
+  fi
+  n_cache="$(find data/asc/cache/hook -name "*${action}*" 2>/dev/null | wc -l | tr -d ' ')"
+  assertEquals 'normal call runs the body once' '1' "$lines"
+  assertEquals 'normal call writes one cache file' '1' "$n_cache"
+
+  hook -w -a "$action" -s 'test'
+  lines="$(wc -l < "$marker" | tr -d ' ')"
+  n_cache="$(find data/asc/cache/hook -name "*${action}*" 2>/dev/null | wc -l | tr -d ' ')"
+  assertEquals 'warmup hit does not run the body again' '1' "$lines"
+  assertEquals 'warmup hit keeps the one cache file' '1' "$n_cache"
+
+  rm -f data/asc/cache/hook/*"${action}"* "$marker"
+  hook -w -a "$action" -s 'test'
+  lines=0
+  if [[ -f "$marker" ]]; then
+    lines="$(wc -l < "$marker" | tr -d ' ')"
+  fi
+  n_cache="$(find data/asc/cache/hook -name "*${action}*" 2>/dev/null | wc -l | tr -d ' ')"
+  assertEquals 'cold warmup does not run the body' '0' "$lines"
+  assertEquals 'cold warmup writes the cache file' '1' "$n_cache"
+
+  hook -a "$action" -s 'test'
+  lines="$(wc -l < "$marker" | tr -d ' ')"
+  assertEquals 'later normal call runs the cached body once' '1' "$lines"
+
+  rm -f data/asc/cache/hook/*"${action}"* "$marker" "$hook_file"
+}
+
+##
+# Prints hook -d candidate paths from a debug capture, one per line.
+#
+# @param 1 String : debug stdout file.
+#
+_hook_test_lookup_candidates() {
+  awk '
+    /lookup paths :/ {p=1; next}
+    p==1 && /^$/ {p=2; next}
+    p==2 && /^$/ {exit}
+    p==2 && $0 !~ /^  / {print}
+  ' "$1"
+}
+
+##
+# Repeats each direct action.hook.sh line after its variant block.
+#
+# @param 1 String : ordered candidate list.
+# @param 2 String : action name.
+# @param 3 Int : extra copies of each direct path.
+#
+_hook_test_expand_directs() {
+  local p_list="$1"
+  local p_action="$2"
+  local p_extra="$3"
+  local line
+  local direct=''
+  local block=''
+  local out=''
+  local i
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -z "$line" ]]; then
+      continue
+    fi
+
+    if [[ "$line" == "${p_action}.hook.sh" || "$line" == */"${p_action}.hook.sh" ]]; then
+      if [[ -n "$direct" ]]; then
+        out+="$block"
+
+        for (( i = 0 ; i < p_extra ; i++ )); do
+          out+="$direct"$'\n'
+        done
+      fi
+
+      direct="$line"
+      block="$line"$'\n'
+    else
+      block+="$line"$'\n'
+    fi
+  done <<< "$p_list"
+
+  if [[ -n "$direct" ]]; then
+    out+="$block"
+
+    for (( i = 0 ; i < p_extra ; i++ )); do
+      out+="$direct"$'\n'
+    done
+  fi
+
+  printf '%s' "${out%$'\n'}"
+}
+
+##
+# Copies of each direct action.hook.sh line, variants omitted.
+#
+# @param 1 String : ordered candidate list.
+# @param 2 String : action name.
+# @param 3 Int : copies of each direct path.
+#
+_hook_test_directs_only() {
+  local p_list="$1"
+  local p_action="$2"
+  local p_copies="$3"
+  local line
+  local out=''
+  local i
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${p_action}.hook.sh" || "$line" == */"${p_action}.hook.sh" ]]; then
+      for (( i = 0 ; i < p_copies ; i++ )); do
+        out+="$line"$'\n'
+      done
+    fi
+  done <<< "$p_list"
+
+  printf '%s' "${out%$'\n'}"
+}
+
+##
+# Project-root candidates for one raw -a value, including its instance variant.
+#
+# @param 1 String : raw action filter.
+#
+_hook_test_root_candidates() {
+  local p_action="$1"
+
+  printf '%s\n%s' "${p_action}.hook.sh" "${p_action}.${INSTANCE_TYPE}.hook.sh"
+}
+
+##
+# Candidate lines that exist as files, in the same order, repeats included.
+#
+# @param 1 String : ordered candidate list.
+#
+_hook_test_existing_candidates() {
+  local p_list="$1"
+  local line
+  local out=''
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -n "$line" && -f "$line" ]]; then
+      out+="$line"$'\n'
+    fi
+  done <<< "$p_list"
+
+  printf '%s' "${out%$'\n'}"
+}
+
+##
+# Repeated -a and -s keep repeated direct candidates. -r appends root paths.
+#
+test_hook_lookup_repeated_filters_keep_direct_candidates() {
+  local action='nftasclook'
+  local hook_file="asc/test/${action}.hook.sh"
+  local dbg='data/asc/nftasclook-dbg.txt'
+  local ordinary=''
+  local repeated_a=''
+  local repeated_s=''
+  local with_root=''
+  local repeated_a_root=''
+  local repeated_s_root=''
+  local ordinary_m=''
+  local repeated_a_m=''
+  local repeated_s_m=''
+  local with_root_m=''
+  local repeated_a_root_m=''
+  local repeated_s_root_m=''
+  local expect_a
+  local expect_s
+  local root_one
+  local root_repeat
+
+  rm -f data/asc/cache/hook/*"${action}"* "$hook_file" "$dbg"
+  touch "$hook_file"
+
+  hook_dry_run_matches=''
+  rm -f data/asc/cache/hook/*"${action}"*
+  hook -a "$action" -s 'test' -t -d > "$dbg"
+  ordinary="$(_hook_test_lookup_candidates "$dbg")"
+  ordinary_m="${hook_dry_run_matches%$'\n'}"
+
+  hook_dry_run_matches=''
+  rm -f data/asc/cache/hook/*"${action}"*
+  hook -a "$action $action" -s 'test' -t -d > "$dbg"
+  repeated_a="$(_hook_test_lookup_candidates "$dbg")"
+  repeated_a_m="${hook_dry_run_matches%$'\n'}"
+
+  hook_dry_run_matches=''
+  rm -f data/asc/cache/hook/*"${action}"*
+  hook -a "$action" -s 'test test' -t -d > "$dbg"
+  repeated_s="$(_hook_test_lookup_candidates "$dbg")"
+  repeated_s_m="${hook_dry_run_matches%$'\n'}"
+
+  hook_dry_run_matches=''
+  rm -f data/asc/cache/hook/*"${action}"*
+  hook -a "$action" -s 'test' -t -d -r > "$dbg"
+  with_root="$(_hook_test_lookup_candidates "$dbg")"
+  with_root_m="${hook_dry_run_matches%$'\n'}"
+
+  hook_dry_run_matches=''
+  rm -f data/asc/cache/hook/*"${action}"*
+  hook -a "$action $action" -s 'test' -t -d -r > "$dbg"
+  repeated_a_root="$(_hook_test_lookup_candidates "$dbg")"
+  repeated_a_root_m="${hook_dry_run_matches%$'\n'}"
+
+  hook_dry_run_matches=''
+  rm -f data/asc/cache/hook/*"${action}"*
+  hook -a "$action" -s 'test test' -t -d -r > "$dbg"
+  repeated_s_root="$(_hook_test_lookup_candidates "$dbg")"
+  repeated_s_root_m="${hook_dry_run_matches%$'\n'}"
+
+  expect_a="$(_hook_test_expand_directs "$ordinary" "$action" 1)"
+  expect_s="$expect_a"$'\n'"$(_hook_test_directs_only "$ordinary" "$action" 2)"
+  root_one="$(_hook_test_root_candidates "$action")"
+  root_repeat="$(_hook_test_root_candidates "$action $action")"
+
+  assertEquals 'ordinary candidates and matches stay in one order' \
+    "$(_hook_test_existing_candidates "$ordinary")" "$ordinary_m"
+  assertEquals 'repeated -a candidate list' \
+    "$expect_a" "$repeated_a"
+  assertEquals 'repeated -a match list' \
+    "$(_hook_test_existing_candidates "$expect_a")" "$repeated_a_m"
+  assertEquals 'repeated -s candidate list' \
+    "$expect_s" "$repeated_s"
+  assertEquals 'repeated -s match list' \
+    "$(_hook_test_existing_candidates "$expect_s")" "$repeated_s_m"
+  assertEquals 'ordinary -r candidate list' \
+    "$ordinary"$'\n'"$root_one" "$with_root"
+  assertEquals 'ordinary -r match list' \
+    "$(_hook_test_existing_candidates "$ordinary"$'\n'"$root_one")" "$with_root_m"
+  assertEquals 'repeated -a -r candidate list' \
+    "$expect_a"$'\n'"$root_repeat" "$repeated_a_root"
+  assertEquals 'repeated -a -r match list' \
+    "$(_hook_test_existing_candidates "$expect_a"$'\n'"$root_repeat")" "$repeated_a_root_m"
+  assertEquals 'repeated -s -r candidate list' \
+    "$expect_s"$'\n'"$root_one" "$repeated_s_root"
+  assertEquals 'repeated -s -r match list' \
+    "$(_hook_test_existing_candidates "$expect_s"$'\n'"$root_one")" "$repeated_s_root_m"
+
+  rm -f data/asc/cache/hook/*"${action}"* "$hook_file" "$dbg"
+}
+
+##
+# f_provision_using_lookup_values: dual-compat + printf -v output.
+#
+test_f_provision_using_lookup_values() {
+  local out=''
+
+  f_provision_using_lookup_values 'compose' 'out'
+  assertEquals 'compose dual-compat via printf -v' 'compose docker-compose' "$out"
+
+  out=''
+  f_provision_using_lookup_values 'docker-compose' 'out'
+  assertEquals 'docker-compose dual-compat via printf -v' 'compose docker-compose' "$out"
+
+  out=''
+  f_provision_using_lookup_values 'asc' 'out'
+  assertEquals 'plain provision value via printf -v' 'asc' "$out"
+
+  # Stdout path kept for callers that still capture.
+  assertEquals 'stdout fallback' 'asc' "$(f_provision_using_lookup_values 'asc')"
+}
+
+##
+# f_hook_variant_values_add expands PROVISION_USING without duplicating.
+#
+test_f_hook_variant_values_add() {
+  local v_values=''
+
+  f_hook_variant_values_add 'PROVISION_USING' 'compose' 'v_values'
+  assertEquals 'compose expands to both tokens' 'compose docker-compose ' "$v_values"
+
+  f_hook_variant_values_add 'PROVISION_USING' 'docker-compose' 'v_values'
+  assertEquals 'second dual add is idempotent' 'compose docker-compose ' "$v_values"
+
+  f_hook_variant_values_add 'INSTANCE_TYPE' 'dev' 'v_values'
+  assertEquals 'normal variant appends once' 'compose docker-compose dev ' "$v_values"
+
+  f_hook_variant_values_add 'INSTANCE_TYPE' 'dev' 'v_values'
+  assertEquals 'normal variant dedupes' 'compose docker-compose dev ' "$v_values"
+}
+
+##
+# f_hook_opt_inc_append_candidates finds colocated opt-incs and dedupes.
+#
+test_f_hook_opt_inc_append_candidates() {
+  local opt_incs_arr=()
+  local dir='asc/extensions/nftaschdehnc/test'
+  local hook_path="$dir/nftaschhnc_dry_run.hook.sh"
+
+  touch "$dir/test.opt-inc.sh" "$dir/nftaschhnc_dry_run.opt-inc.sh"
+
+  f_hook_opt_inc_append_candidates "$hook_path" opt_incs_arr
+  assertEquals 'should find subject + action opt-incs' 2 "${#opt_incs_arr[@]}"
+  assertTrue 'subject opt-inc' "[[ \" \${opt_incs_arr[*]} \" == *\" $dir/test.opt-inc.sh \"* ]]"
+  assertTrue 'action opt-inc' "[[ \" \${opt_incs_arr[*]} \" == *\" $dir/nftaschhnc_dry_run.opt-inc.sh \"* ]]"
+
+  f_hook_opt_inc_append_candidates "$hook_path" opt_incs_arr
+  assertEquals 'second append must dedupe' 2 "${#opt_incs_arr[@]}"
+
+  f_hook_opt_inc_append_candidates "$dir/not_a_hook.sh" opt_incs_arr
+  assertEquals 'non-hook paths ignored' 2 "${#opt_incs_arr[@]}"
+
+  rm -f "$dir/test.opt-inc.sh" "$dir/nftaschhnc_dry_run.opt-inc.sh"
+}
+
+##
+# hook_ms ranks a path before it adds dot-parts and slash-parts.
+#
+test_hook_ms_rung_order() {
+  local -a paths=(
+    'asc/db/dump.hook.sh'
+    'asc/extensions/db/db/dump.hook.sh'
+    'scripts/asc/contrib/asc/mysql/db/dump.mysql.hook.sh'
+    'scripts/asc/contrib/acme/mysql/db/dump.hook.sh'
+    'scripts/asc/extend/db/dump.hook.sh'
+    'env.local.dev.yml'
+  )
+  local expect_rungs=(0 0 1 2 3 4)
+  local i
+
+  for i in "${!paths[@]}"; do
+    f_hook_ms_measure "${paths[$i]}"
+    assertEquals "rung ${paths[$i]}" "${expect_rungs[$i]}" "$hook_ms_rung"
+  done
+
+  # Inside rung 0 the sum is unchanged: more slashes still beat a shallower core file.
+  f_hook_ms_measure 'asc/db/dump.hook.sh'
+  local core_sum=$hook_ms_sum
+  f_hook_ms_measure 'asc/extensions/db/db/dump.hook.sh'
+  assertTrue 'extension sum beats core sum' "[[ $hook_ms_sum -gt $core_sum ]]"
+
+  # The old sum picked the deep ASC-shipped hook implementation (15) over extend (12 or 13).
+  # Rung 3 must beat rung 1 even when the extend filename has fewer dots.
+  local best=''
+  local best_rung=-1
+  local best_sum=-1
+  local f
+  for f in \
+    'scripts/asc/contrib/asc/mysql/db/dump.mysql.hook.sh' \
+    'scripts/asc/extend/db/dump.hook.sh'
+  do
+    f_hook_ms_measure "$f"
+    if [[ $hook_ms_rung -gt $best_rung ]] \
+      || { [[ $hook_ms_rung -eq $best_rung ]] && [[ $hook_ms_sum -ge $best_sum ]]; }; then
+      best="$f"
+      best_rung=$hook_ms_rung
+      best_sum=$hook_ms_sum
+    fi
+  done
+  assertEquals 'extend beats asc-shipped contrib' \
+    'scripts/asc/extend/db/dump.hook.sh' "$best"
+
+  best=''
+  best_rung=-1
+  best_sum=-1
+  for f in \
+    'scripts/asc/contrib/asc/mysql/db/dump.mysql.aaa.bbb.hook.sh' \
+    'scripts/asc/contrib/acme/mysql/db/dump.hook.sh'
+  do
+    f_hook_ms_measure "$f"
+    if [[ $hook_ms_rung -gt $best_rung ]] \
+      || { [[ $hook_ms_rung -eq $best_rung ]] && [[ $hook_ms_sum -ge $best_sum ]]; }; then
+      best="$f"
+      best_rung=$hook_ms_rung
+      best_sum=$hook_ms_sum
+    fi
+  done
+  assertEquals 'other vendor beats asc-shipped contrib' \
+    'scripts/asc/contrib/acme/mysql/db/dump.hook.sh' "$best"
+}
+
+##
+# Remove zzscore fixture files created by test_hook_ms_extend_beats_contrib.
+#
+_hook_test_zzscore_cleanup() {
+  rm -f \
+    scripts/asc/contrib/asc/zzscorea/zzscore/zzscore.aaa.bbb.hook.sh \
+    scripts/asc/contrib/zzvendor/zzscorev/zzscore/zzscore.hook.sh \
+    scripts/asc/extend/zzscore/zzscore.hook.sh \
+    data/asc/cache/hook/*zzscore*
+  rmdir \
+    scripts/asc/extend/zzscore \
+    scripts/asc/contrib/zzvendor/zzscorev/zzscore \
+    scripts/asc/contrib/zzvendor/zzscorev \
+    scripts/asc/contrib/zzvendor \
+    scripts/asc/contrib/asc/zzscorea/zzscore \
+    scripts/asc/contrib/asc/zzscorea \
+    2>/dev/null || true
+}
+
+##
+# hook_ms dry-run prefers scripts/asc/extend over both contrib rungs.
+#
+test_hook_ms_extend_beats_contrib() {
+  local saved_ext="$ASC_EXTENSIONS"
+  local saved_extend_subjects="${EXTEND_SUBJECTS-}"
+  local saved_extend_actions="${EXTEND_ACTIONS-}"
+  local saved_extend_objects="${EXTEND_OBJECTS-}"
+  local saved_inc="${ASC_INC-}"
+  local dir
+
+  _hook_test_zzscore_cleanup
+
+  for dir in \
+    scripts/asc/contrib/asc/zzscorea/zzscore \
+    scripts/asc/contrib/zzvendor/zzscorev/zzscore \
+    scripts/asc/extend/zzscore
+  do
+    mkdir -p "$dir"
+  done
+
+  # More dots on the ASC-shipped file, on purpose.
+  touch scripts/asc/contrib/asc/zzscorea/zzscore/zzscore.aaa.bbb.hook.sh
+  touch scripts/asc/contrib/zzvendor/zzscorev/zzscore/zzscore.hook.sh
+  touch scripts/asc/extend/zzscore/zzscore.hook.sh
+
+  f_asc_extend 'scripts/asc/contrib/asc/zzscorea'
+  f_asc_extend 'scripts/asc/contrib/zzvendor/zzscorev'
+  f_asc_extend 'scripts/asc/extend'
+
+  ASC_EXTENSIONS="$saved_ext asc/zzscorea zzvendor/zzscorev extend"
+  rm -f data/asc/cache/hook/*zzscore*
+
+  most_specific_match=''
+  hook_ms 'dry-run' -s 'zzscore' -a 'zzscore' -t
+
+  assertEquals 'dry-run winner is extend' \
+    'scripts/asc/extend/zzscore/zzscore.hook.sh' \
+    "$most_specific_match"
+
+  _hook_test_zzscore_cleanup
+  ASC_EXTENSIONS="$saved_ext"
+  EXTEND_SUBJECTS="$saved_extend_subjects"
+  EXTEND_ACTIONS="$saved_extend_actions"
+  EXTEND_OBJECTS="$saved_extend_objects"
+  ASC_INC="$saved_inc"
+  unset ZZSCOREA_SUBJECTS ZZSCOREA_ACTIONS ZZSCOREA_OBJECTS
+  unset ZZSCOREV_SUBJECTS ZZSCOREV_ACTIONS ZZSCOREV_OBJECTS
 }
 
 ##
@@ -202,6 +724,9 @@ oneTimeTearDown() {
     rm -f "asc/$s/nftaschhnc_dry_run.hook.sh"
   done
   rm -fr "asc/extensions/nftaschdehnc"
+  rm -f asc/test/nftaschw.hook.sh data/asc/nftaschw_marker.txt data/asc/cache/hook/*nftaschw*
+  rm -f asc/test/nftasclook.hook.sh data/asc/nftasclook-dbg.txt data/asc/cache/hook/*nftasclook*
+  _hook_test_zzscore_cleanup
 }
 
 . asc/vendor/shunit2/shunit2

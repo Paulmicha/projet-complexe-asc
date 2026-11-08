@@ -25,9 +25,10 @@ purge_list_arr=()
 
 # Manual cleanup of ASC global env vars.
 purge_list_arr+=('.env')
-purge_list_arr+=('data/asc/global.vars.sh')
+purge_list_arr+=('data/asc/globals.sh')
 
 # ASC make shortcuts too.
+purge_list_arr+=('data/asc/pivots.mk')
 purge_list_arr+=('data/asc/generated.mk')
 
 # Let extensions clean up their own generated files and/or alter the purge_list_arr.
@@ -64,4 +65,4 @@ for entry in "${purge_list_arr[@]}"; do
 done
 
 # Clear all ASC cache entries.
-. asc/asc/cache_clear.sh
+. asc/core/cache_clear.sh

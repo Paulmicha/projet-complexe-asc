@@ -13,7 +13,7 @@
 # Adds (once) a cronjob on local host.
 #
 # TODO [debt] Find better workaround to load PATH of required user. Currently :
-#   su $a_user -c "my command (param 1)"
+#   su $p_user -c "my command (param 1)"
 # -> avoid double quotes inside param 1 unless escaped (untested).
 #
 # @requires the 'crontab' software.
@@ -46,24 +46,24 @@
 #   f_host_crontab_add "cd $PROJECT_DOCROOT && make drush cron" '*/20 * * * *' 'www-data'
 #
 f_host_crontab_add() {
-  local a_cmd="$1"
-  local a_freq="$2"
-  local a_user="$3"
+  local p_cmd="$1"
+  local p_freq="$2"
+  local p_user="$3"
 
-  if [[ -z "$a_freq" ]]; then
-    a_freq="*/30 * * * *"
+  if [[ -z "$p_freq" ]]; then
+    p_freq="*/30 * * * *"
   fi
 
-  if [[ -z "$a_user" ]]; then
-    a_user="$USER"
+  if [[ -z "$p_user" ]]; then
+    p_user="$USER"
   fi
 
   # TODO [debt] find better workaround to run with PATH of required user loaded.
   # @see http://www.lostsaloon.com/technology/how-to-run-cron-jobs-as-a-specific-user/
-  local cronjob="$a_freq su $a_user -c \"$a_cmd\""
+  local cronjob="$p_freq su $p_user -c \"$p_cmd\""
 
   # See https://stackoverflow.com/a/17975418
-  ( crontab -l | grep -v -F "$a_cmd" ; echo "$cronjob" ) | crontab -
+  ( crontab -l | grep -v -F "$p_cmd" ; echo "$cronjob" ) | crontab -
 }
 
 ##
@@ -82,8 +82,8 @@ f_host_crontab_add() {
 #   f_host_crontab_remove "cd $PROJECT_DOCROOT && make drush cron"
 #
 f_host_crontab_remove() {
-  local a_cmd="$1"
-  ( crontab -l | grep -v -F "$a_cmd" ) | crontab -
+  local p_cmd="$1"
+  ( crontab -l | grep -v -F "$p_cmd" ) | crontab -
 }
 
 ##
@@ -91,17 +91,24 @@ f_host_crontab_remove() {
 #
 # See https://github.com/hbons/Dazzle/blob/master/dazzle.sh
 #
+# @param 1 [optional] String : output var name (default: host_ip).
+#
 f_host_ip() {
+  local p_output_var_name="${1:-host_ip}"
+  local result
+
   # Fetch the external IP address :
   # 1. fetch all inet addresses (IPv4)
   # 2. select only global scope addresses
   # 3. extract the address
   # 4. limit the list to the first address to get only one IP in case the server has more than one
-  ip -f inet addr \
+  result="$(ip -f inet addr \
     | grep "inet .* scope global" \
     | grep -Po "inet ([\d+\.]+)" \
     | cut -c 6- \
-    | head -n1
+    | head -n1)"
+
+  printf -v "$p_output_var_name" '%s' "$result"
 }
 
 ##
@@ -111,9 +118,13 @@ f_host_ip() {
 #
 # See https://unix.stackexchange.com/a/6348
 #
+# @param 1 [optional] String : output var name (default: host_os).
+#
 f_host_os() {
+  local p_output_var_name="${1:-host_os}"
   local os=''
   local version=''
+  local result
 
   # freedesktop.org and systemd
   if [ -f /etc/os-release ]; then
@@ -144,13 +155,19 @@ f_host_os() {
   fi
 
   # Prevent unexpected characters.
+  if ! type f_str_slug &>/dev/null; then
+    # shellcheck disable=SC1091
+    . asc/core/utils/str_slug.manual-inc.sh
+  fi
   f_str_slug "$os" '-' 'os'
   f_str_slug "$version" '.' 'version'
 
   # Prevent '-gnu-linux' in OS name.
   os=${os/-gnu-linux/""}
 
-  echo "$os-$version" | tr '[:upper:]' '[:lower:]'
+  result="${os}-${version}"
+  result="${result,,}"
+  printf -v "$p_output_var_name" '%s' "$result"
 }
 
 ##
@@ -261,16 +278,16 @@ f_host_registry_del() {
 #   fi
 #
 f_host_once() {
-  local a_flag="$1"
+  local p_flag="$1"
 
   # TODO check what happens in case of unexpected collisions (if that var
   # already exists in calling scope).
   local reg_val
 
-  f_host_registry_get "$a_flag"
+  f_host_registry_get "$p_flag"
 
   if [[ $reg_val -ne 1 ]]; then
-    f_host_registry_set "$a_flag"
+    f_host_registry_set "$p_flag"
     return
   fi
 

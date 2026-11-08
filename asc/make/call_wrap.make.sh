@@ -10,8 +10,8 @@
 # instance is initialized and the generated cache file does not exist yet.
 #
 # @see asc/make/default.mk
-# @see data/asc/generated.mk
-# @see data/asc/cache/make.sh
+# @see data/asc/pivots.mk
+# @see data/asc/cache/pivots.sh
 # @see f_instance_init() in asc/instance/instance.inc.sh
 # @see f_make_generate() in asc/make/make.inc.sh
 #
@@ -55,12 +55,12 @@
 # echo "raw args :"
 # echo "  $@"
 
-a_real_script="$1"
+p_real_script="$1"
 shift
 
-if [[ ! -f "$a_real_script" ]]; then
+if [[ ! -f "$p_real_script" ]]; then
   echo >&2
-  echo "Error in $BASH_SOURCE line $LINENO : script '$a_real_script' not found." >&2
+  echo "Error in $BASH_SOURCE line $LINENO : script '$p_real_script' not found." >&2
   echo "-> Aborting (1)." >&2
   echo >&2
   exit 1
@@ -70,12 +70,12 @@ invoked_make_target="$1"
 make_entry_point="$1"
 shift
 
-make_entries_arr=()
+pivots_arr=()
 real_scripts_arr=()
 
 # Use the complete generated list of entries if it exists.
-if [[ -f data/asc/cache/make.sh ]]; then
-  . data/asc/cache/make.sh
+if [[ -f data/asc/cache/pivots.sh ]]; then
+  . data/asc/cache/pivots.sh
 else
   # Default to hardcoded values.
   f_make_list_hardcoded
@@ -83,7 +83,7 @@ fi
 
 # Debug.
 # echo
-# echo "a_real_script = $a_real_script"
+# echo "p_real_script = $p_real_script"
 # echo "make_entry_point = $make_entry_point"
 
 # Won't use that here to do all in one loop below.
@@ -108,8 +108,8 @@ while [ $# -gt 0 ]; do
 
   # First, make sure the rest of the args won't accidentally trigger another
   # entry point.
-  for i in "${!make_entries_arr[@]}"; do
-    make_entry_point="${make_entries_arr[i]}"
+  for i in "${!pivots_arr[@]}"; do
+    make_entry_point="${pivots_arr[i]}"
     real_script="${real_scripts_arr[i]}"
 
     case "$arg" in "$make_entry_point")
@@ -117,7 +117,7 @@ while [ $# -gt 0 ]; do
       echo "The value '$arg' is reserved as a Make entry point." >&2
       echo "Use the following equivalent command instead :" >&2
       echo >&2
-      echo "  $a_real_script $rest_of_args" >&2
+      echo "  $p_real_script $rest_of_args" >&2
       echo >&2
       exit 2
     esac
@@ -146,14 +146,14 @@ done
 # echo "  $escaped_args"
 # echo
 # echo "call :"
-# echo "  $a_real_script $escaped_args"
+# echo "  $p_real_script $escaped_args"
 # echo
 
-case "$a_real_script" in
-  */test/case.run.sh)
-    eval "$a_real_script $(printf '%q' "$invoked_make_target") $escaped_args"
+case "$p_real_script" in
+  */test/single_case.make.sh)
+    eval "$p_real_script $(printf '%q' "$invoked_make_target") $escaped_args"
     ;;
   *)
-    eval "$a_real_script $escaped_args"
+    eval "$p_real_script $escaped_args"
     ;;
 esac

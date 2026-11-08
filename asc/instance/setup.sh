@@ -69,7 +69,7 @@ fi
 instance_type='dev'
 host_type='local'
 stack_version=''
-provision_using='compose'
+provision_using='asc'
 
 if [[ -n "$1" ]]; then
   instance_type="$1"
@@ -91,8 +91,10 @@ fi
 # the setup script before uninit.
 purge_list_arr=()
 purge_list_arr+=('.env')
-purge_list_arr+=('data/asc/global.vars.sh')
+purge_list_arr+=('data/asc/globals.sh')
+purge_list_arr+=('data/asc/pivots.mk')
 purge_list_arr+=('data/asc/generated.mk')
+purge_list_arr+=('data/asc/cache/pivots.sh')
 purge_list_arr+=('data/asc/cache/make.sh')
 
 for entry in "${purge_list_arr[@]}"; do

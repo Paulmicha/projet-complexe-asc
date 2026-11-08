@@ -1,0 +1,694 @@
+#!/usr/bin/env bash
+
+##
+# Init-only global aggregate helpers.
+#
+# Callers must source this file.
+#
+# Convention : functions names are all prefixed by "f".
+#
+
+##
+# Gets the list of all globals variable names and their values.
+#
+# For performance reasons (to avoid using a subshell), this function writes its
+# result to local variables subject to collision in calling scope :
+#
+# @var asc_globals_var_names_arr
+# @var asc_globals_values_arr
+#
+# @example
+#   # Print all var names :
+#   f_global_list
+#   for var_name in "${asc_globals_var_names_arr[@]}"; do
+#     echo "$var_name"
+#   done
+#
+#   # Print all values :
+#   f_global_list
+#   for value in "${asc_globals_values_arr[@]}"; do
+#     echo "$value"
+#   done
+#
+#   # Print both :
+#   f_global_list
+#   for i in "${!asc_globals_var_names_arr[@]}"; do
+#     var_name="${asc_globals_var_names_arr[$i]}"
+#     value="${asc_globals_values_arr[$i]}"
+#     echo "$var_name = '$value'"
+#   done
+#
+f_global_list() {
+  asc_globals_values_arr=()
+  asc_globals_var_names_arr=()
+
+  # During instance init, the $GLOBALS associative array already exists.
+  # Otherwise, we re-aggregate globals to get all supported variable names (in
+  # "dry run" mode, cf. the GLOBALS_DRY_RUN switch).
+  if [[ $GLOBALS_COUNT -eq 0 ]]; then
+    declare -A GLOBALS
+    GLOBALS_COUNT=0
+    GLOBALS_UNIQUE_NAMES=()
+    GLOBALS_UNIQUE_KEYS=()
+    GLOBALS_DEFERRED=()
+    GLOBALS['.defer-max']=0
+    GLOBALS_DRY_RUN=1
+    . asc/core/global.vars.sh
+    f_global_aggregate
+  fi
+
+  local global_var_name
+
+  for global_var_name in "${GLOBALS_UNIQUE_NAMES[@]}"; do
+    asc_globals_var_names_arr+=("$global_var_name")
+    asc_globals_values_arr+=("${!global_var_name}")
+  done
+}
+
+##
+# Buils the lookup path list for global env vars declarations.
+#
+# This produces lookup paths by subject, action, and extensions.
+#
+# NB : this function writes its result to a variable subject to collision in
+# calling scope.
+#
+# @var global_lookup_paths
+#
+# @see f_instance_init()
+# @see f_global_aggregate()
+#
+# @example
+#   global_lookup_paths=''
+#   f_global_lookup_paths
+#   echo "$global_lookup_paths" # <- Yields the following lookup paths :
+#   # - asc/<ASC_SUBJECTS>/global.vars.sh
+#   # - asc/extensions/<ASC_EXTENSIONS>/<EXT_SUBJECTS>/global.vars.sh
+#   # - asc/extensions/<ASC_EXTENSIONS>/global.vars.sh
+#   # - scripts/global.vars.sh
+#   # - asc/<ASC_SUBJECTS>/global.<PROVISION_USING>.vars.sh
+#   # - asc/extensions/<ASC_EXTENSIONS>/<EXT_SUBJECTS>/global.<PROVISION_USING>.vars.sh
+#   # - asc/extensions/<ASC_EXTENSIONS>/global.<PROVISION_USING>.vars.sh
+#   # - scripts/global.<PROVISION_USING>.vars.sh
+#   # -> Ex :
+#   # - asc/app/global.vars.sh
+#   # - asc/app/global.compose.vars.sh
+#   # - ...
+#
+f_global_lookup_paths() {
+  local f
+  local hook_dry_run_matches
+  local extension
+  local provision_suffix
+  local provision_suffixes
+
+  # 1. Files named without variant (i.e. 'global.vars.sh')
+  hook_dry_run_matches=''
+  hook -a 'global' -c 'vars.sh' -t
+  for f in $hook_dry_run_matches; do
+    global_lookup_paths+="$f "
+  done
+  # ... including extra lookup paths at the root of extensions' folders.
+  if [[ -n "$ASC_EXTENSIONS" ]]; then
+    for extension in $ASC_EXTENSIONS; do
+      ext_path=''
+      f_asc_extension_path "$extension"
+      if [[ -f "$ext_path/$extension/global.vars.sh" ]]; then
+        global_lookup_paths+="$ext_path/$extension/global.vars.sh "
+      fi
+    done
+  fi
+
+  # 2. Files using variant in their name (i.e. 'global.compose.vars.sh')
+  # Fetch provision suffixes once (was called again inside the extension loop).
+  f_provision_using_lookup_values "${PROVISION_USING:-}" 'provision_suffixes'
+  for provision_suffix in $provision_suffixes; do
+    hook_dry_run_matches=''
+    hook -a 'global' -c "${provision_suffix}.vars.sh" -t
+    for f in $hook_dry_run_matches; do
+      global_lookup_paths+="$f "
+    done
+  done
+  # ... including extra lookup paths at the root of extensions' folders.
+  if [[ -n "$ASC_EXTENSIONS" && -n "$provision_suffixes" ]]; then
+    for extension in $ASC_EXTENSIONS; do
+      ext_path=''
+      f_asc_extension_path "$extension"
+      for provision_suffix in $provision_suffixes; do
+        if [[ -f "$ext_path/$extension/global.${provision_suffix}.vars.sh" ]]; then
+          global_lookup_paths+="$ext_path/$extension/global.${provision_suffix}.vars.sh "
+        fi
+      done
+    done
+  fi
+}
+
+##
+# Aggregates all global env vars and assigns their value(s).
+#
+# This function can be called in different contexts :
+#   1. generating globals for the first time
+#   2. updating previously generated globals
+#   3. get the list of all globals (dynamically)
+#
+# When it's 3. we need to also read the custom Yaml declarations. It's already
+# loaded in calling scope for the other 2 cases.
+#
+# It manipulates or reads the following vars from calling scope :
+#
+# @var yaml_parsed_sp_init
+# @var yaml_parsed_globals
+# @var globals_skip_yaml
+#
+# @see f_instance_init()
+# @see f_global_list()
+# @see f_global_lookup_paths()
+# @see global()
+# @see f_instance_yaml_config_load()
+#
+f_global_aggregate() {
+  local inc
+  local global_lookup_paths=''
+
+  # The context 3. (get the list of all globals) requires adding the custom Yaml
+  # declarations.
+  if [[ -z "$yaml_parsed_globals" ]]; then
+    yaml_parsed_sp_init=''
+    yaml_parsed_globals=''
+    f_instance_yaml_config_load
+    if [[ -n "$yaml_parsed_globals" ]]; then
+      eval "$yaml_parsed_globals"
+    fi
+  fi
+
+  # Flag to alter the default global() process in order to get YAML precedence.
+  globals_skip_yaml=1
+
+  f_global_lookup_paths
+
+  for inc in $global_lookup_paths; do
+    # Allow overrides for any "global.vars.sh" lookup path.
+    f_autoload_override "$inc" 'continue'
+    eval "$inc_override_evaled_code"
+
+    . "$inc"
+  done
+
+  # Support deferred value assignment.
+  # @see global()
+  if [[ ${GLOBALS['.defer-max']} -gt 0 ]]; then
+    i=0
+    max=${GLOBALS['.defer-max']}
+    for (( i=1; i<=$max; i++ )); do
+      for global_name in ${GLOBALS[".defer-$i"]}; do
+
+        # Debug
+        # echo
+        # echo "  ! level $i Deferred assign_value for $global_name (currently = '${!global_name}')"
+
+        f_global_assign_value "$global_name"
+      done
+    done
+
+    # Debug
+    # echo
+  fi
+}
+
+##
+# Update 2026-09 Comment out be keep here in case we change our minds.
+# Executes given callback function for all env vars discovered so far.
+#
+# @requires the following globals in calling scope :
+# - $GLOBALS
+# - $GLOBALS_UNIQUE_NAMES
+#
+# @see f_global_aggregate()
+#
+# @example
+#   f_global_foreach f_global_assign_value
+#
+# f_global_foreach() {
+#   local p_callback="$1"
+#   local globals_arr
+#   local global_name
+
+#   for global_name in ${GLOBALS['.sorting']}; do
+#     f_str_split1 'globals_arr' "$global_name" '|'
+#     global_name="${globals_arr[1]}"
+#     $p_callback $global_name
+#   done
+# }
+
+##
+# Assigns arg or default value to given global env var.
+#
+# Unless "-y" flag is used in instance init call, this will also prompt for
+# user input (terminal) before using default value fallback.
+#
+# @param 1 String : global variable name.
+#
+# @requires or uses the following globals in calling scope :
+# - $GLOBALS
+# - $GLOBALS_DRY_RUN
+# - $p_ascii_yes
+# - $p_ascii_my_var_name (replacing 'MY_VAR_NAME' with the actual var name)
+# - $test_asc_global_aggregate
+#
+# @see global()
+#
+# @example
+#   f_global_assign_value 'MY_VAR_NAME'
+#
+f_global_assign_value() {
+  local p_var="$1"
+  local multi_values=''
+
+  if [[ $GLOBALS_DRY_RUN -eq 1 ]]; then
+    return
+  fi
+
+  f_str_sanitize_var_name "$p_var" 'p_var'
+
+  # Debug.
+  # echo "    f_global_assign_value() $p_var"
+
+  # Support tests.
+  # @see asc/test/asc/global.test.sh
+  if [[ $test_asc_global_aggregate -ne 1 ]]; then
+    eval "unset $p_var"
+  fi
+
+  # Any arguments passed to f_instance_init() take precedence.
+  local arg_var_name="p_ascii_$p_var"
+  f_str_lowercase "$arg_var_name" 'arg_var_name'
+  local arg_val="${!arg_var_name}"
+
+  local default_val="${GLOBALS[$p_var|default]}"
+
+  # Conditions should also apply for deferred assignments. In fact, it's when
+  # they're most useful because it ensures depending vars are already assigned.
+  if [[ -n "${GLOBALS[$p_var|condition]}" ]]; then
+    local depending_var="${GLOBALS[$p_var|depending_var]}"
+    local depending_value="${!depending_var}"
+    local depending_match="${GLOBALS[$p_var|depending_match]}"
+
+    # For each condition type, deal with true/false fallback values. If none are
+    # set and the condition doesn't match, we return early (no assignment).
+    case "${GLOBALS[$p_var|condition]}" in
+      'ifnot')
+        if [[ "$depending_value" == "$depending_match" ]]; then
+          if [[ -n "${GLOBALS[$p_var|value_if_false]}" ]]; then
+            default_val="${GLOBALS[$p_var|value_if_false]}"
+
+            # Debug.
+            # echo "    $p_var = '$default_val' // Set default_val to conditional value if false."
+          else
+
+            # Debug.
+            # echo "    $p_var : no assignment for condition ${GLOBALS[$p_var|condition]} (depending_value = '$depending_value', depending_match = '$depending_match')"
+
+            return
+          fi
+        elif [[ -n "${GLOBALS[$p_var|value_if_true]}" ]]; then
+          default_val="${GLOBALS[$p_var|value_if_true]}"
+
+            # Debug.
+            # echo "    $p_var = '$default_val' // Set default_val to conditional value if true."
+        fi
+        ;;
+      'if')
+        if [[ "$depending_value" != "$depending_match" ]]; then
+          if [[ -n "${GLOBALS[$p_var|value_if_false]}" ]]; then
+            default_val="${GLOBALS[$p_var|value_if_false]}"
+
+            # Debug.
+            # echo "    $p_var = '$default_val' // Set default_val to conditional value if false."
+          else
+
+            # Debug.
+            # echo "    $p_var : no assignment for condition ${GLOBALS[$p_var|condition]} (depending_value = '$depending_value', depending_match = '$depending_match')"
+
+            return
+          fi
+        elif [[ -n "${GLOBALS[$p_var|value_if_true]}" ]]; then
+          default_val="${GLOBALS[$p_var|value_if_true]}"
+
+            # Debug.
+            # echo "    $p_var = '$default_val' // Set default_val to conditional value if true."
+        fi
+        ;;
+    esac
+  fi
+
+  if [[ -n "$arg_val" ]]; then
+    printf -v "$p_var" '%s' "$arg_val"
+
+    # Debug.
+    # echo "    $p_var = '$arg_val' // Value directly passed by argument or YAML config file."
+
+  # Non-configurable vars.
+  elif [[ "${GLOBALS[$p_var|no_prompt]}" == 1 ]]; then
+    printf -v "$p_var" '%s' "${GLOBALS[$p_var|value]}"
+
+    # Debug.
+    # echo "    $p_var = '${GLOBALS[$p_var|value]}' // Non-configurable var."
+
+  # List or "pile" of values (space-separated string).
+  elif [[ -n "${GLOBALS[$p_var|values]}" ]] && [[ $test_asc_global_aggregate -ne 1 ]]; then
+    multi_values="${GLOBALS[$p_var|values]}"
+    printf -v "$p_var" '%s' "$multi_values"
+
+    # Debug.
+    # echo "    $p_var = '$multi_values' // 'Append' type list (space-separated string)."
+
+  # Skippable terminal prompts for manual user input ('-y' flag to disable).
+  elif [[ $p_ascii_yes -eq 0 ]]; then
+    echo
+    echo "Initializing $p_var value :"
+
+    if [[ -n "${GLOBALS[$p_var|help]}" ]]; then
+      echo "${GLOBALS[$p_var|help]}"
+    fi
+
+    if [[ -n "$default_val" ]]; then
+      eval "read -p \"-> Enter $p_var value. Leave blank to use the default value '$default_val' : \" $p_var"
+    else
+      eval "read -p \"-> Enter $p_var value : \" $p_var"
+    fi
+  fi
+
+  # Assign default value fallback if the value is empty (e.g. may have been the
+  # result of entering empty value in prompt).
+  local empty_test="${!p_var}"
+  if [[ -z "$empty_test" ]]; then
+
+    # If the same global is encountered more than once, then it can mean the
+    # deferred assignment is requested to replace the value (or append more
+    # values to it).
+    if [[ -z "$multi_values" ]] && [[ -n "${GLOBALS[$p_var|value]}" ]]; then
+      printf -v "$p_var" '%s' "${GLOBALS[$p_var|value]}"
+
+      # Debug.
+      # echo "    $p_var = '${GLOBALS[$p_var|value]}' // Deferred manual value assignment."
+
+    elif [[ -n "$default_val" ]]; then
+      printf -v "$p_var" '%s' "$default_val"
+
+      # Debug.
+      # echo "    $p_var = '$default_val' // Assign default value fallback because the value is empty."
+    fi
+  fi
+
+  # Once prompt has been made, prevent repeated calls for this var (recursion).
+  # Except for 'append' vars (multiple values must pile-up on each call).
+  if [[ $p_ascii_yes -eq 0 ]]; then
+    if [[ ${GLOBALS[$p_var|no_prompt]} -ne 1 ]] && [[ -z "$multi_values" ]]; then
+      GLOBALS[$p_var|no_prompt]=1
+      GLOBALS[$p_var|value]="${!p_var}"
+    fi
+  fi
+}
+
+##
+# Adds new variable in $GLOBALS.
+#
+# Increments a shared counter to maintain order, because some variables may depend
+# on each other.
+#
+# @param 1 String : global variable name.
+# @param 2 [optional] String : non-configurable value or key/value syntax (see
+#   examples below)
+# @param 3 Integer : flag to prevent immediate value assignment.
+#
+# @requires the following globals in calling scope (main shell) :
+# - $GLOBALS
+# - $GLOBALS_COUNT
+# - $GLOBALS_UNIQUE_NAMES
+# - $GLOBALS_UNIQUE_KEYS
+#
+# @see f_global_assign_value()
+#
+# For better readability in env includes files_arr, we exceptionally name that
+# function without following the usual convention.
+#
+# @examples (write)
+#   global MY_VAR_NAME
+#   global MY_VAR_NAME "Simple string declaration (non-configurable / no prompt to customize during init)"
+#   global MY_VAR_NAME2 "[default]=test"
+#
+#   # Custom keys may be used, provided they don't clash with the following keys
+#   # already used internally by ASC :
+#   # - 'default'
+#   # - 'value'
+#   # - 'values'
+#   # - 'append'
+#   # - 'if-VAR_NAME'
+#   # - 'ifnot-VAR_NAME'
+#   # - 'no_prompt'
+#   # - 'index'
+#   global MY_VAR_NAME3 "[key]=value [key2]='value 2' [key3]='$(my_callback_function)'"
+#
+# @examples (append)
+#   # Notice there cannot be any space inside each value.
+#   global MY_MULTI_VALUE_VAR "[append]=multiple"
+#   global MY_MULTI_VALUE_VAR "[append]=declarations"
+#   global MY_MULTI_VALUE_VAR "[append]=will-be"
+#   global MY_MULTI_VALUE_VAR "[append]=appended/to"
+#   global MY_MULTI_VALUE_VAR "[append]=a_SPACE_separated_string"
+#   # Example read :
+#   for val in $MY_MULTI_VALUE_VAR; do
+#     echo "MY_MULTI_VALUE_VAR value : $val"
+#   done
+#
+# @examples (condition)
+#   global MY_VAR "hello value"
+#   global MY_COND_VAR_NOMATCH "[if-MY_VAR]=test [default]=foo"
+#   global MY_COND_VAR_MATCH "[if-MY_VAR]='hello value' [default]=bar"
+#   # To verify (should only output MY_COND_VAR_MATCH) :
+#   f_global_foreach f_global_assign_value
+#   f_global_debug
+#
+# @example (read)
+#   f_global_debug
+#
+# @example (deferred assignment)
+#   # This is used so that globals may depend on others declared or
+#   # overridden in other includes. It functions like CSS z-index : higher
+#   # values get assigned later. It eliminates the need to control aggregation
+#   # order : instead, it guarantees the order of values assignment.
+#   global ANOTHER_VAR 'test'
+#   global MY_DEFERRED_VAR "[index]=1 [if-ANOTHER_VAR]=test [value]='my value'"
+#   global MY_DEFERRED_VAR_2 "[index]=2 [value]='${MY_DEFERRED_VAR} can be used here without worrying if it was already assigned or not.'"
+#
+global() {
+  local p_var_name="$1"
+  local p_values="$2"
+  local p_prevent_assignment="$3"
+
+  local index='0'
+
+  f_str_sanitize_var_name "$p_var_name" 'p_var_name'
+
+  # Skip any var that was already set in YAML files.
+  # @see f_global_aggregate()
+  if [[ -n "$yaml_parsed_globals" ]] && [[ $globals_skip_yaml -eq 1 ]]; then
+    case "$yaml_parsed_globals" in *"global ${p_var_name} "*)
+      return
+    esac
+  fi
+
+  # TODO [evol] sanitize $p_values ?
+  if [[ -n "$p_values" ]]; then
+
+    # If the value does not begin with '[', assume the var non-configurable.
+    if [[ "${p_values:0:1}" != '[' ]]; then
+      GLOBALS["${p_var_name}|value"]="$p_values"
+      GLOBALS["${p_var_name}|no_prompt"]=1
+
+    # Key/value store system.
+    else
+      local key
+      local declaration_dict
+
+      # Transform input string to associative array.
+      eval "declare -A declaration_dict=( $p_values )"
+
+      for key in "${!declaration_dict[@]}"; do
+        f_array_add_once "$key" GLOBALS_UNIQUE_KEYS
+
+        case "$key" in
+
+          # Controls the order of assignment. Higher values defer later.
+          index)
+            index="${declaration_dict[$key]}"
+          ;;
+
+          # Handles conditional declarations. Prevents declaring the variable
+          # altogether if the depending variable's value does not match the one
+          # provided (matching using operator provided as a prefix).
+          if-*|ifnot-*)
+            local depending_var
+            local depending_var_split_arr
+            local depending_value
+
+            f_str_split1 'depending_var_split_arr' "$key" '-'
+            depending_var="${depending_var_split_arr[1]}"
+
+            f_str_sanitize_var_name "$depending_var" 'depending_var'
+            depending_value="${!depending_var}"
+
+            # Needed for deferred assignments.
+            # @see f_global_assign_value()
+            GLOBALS["$p_var_name|depending_var"]="$depending_var"
+            GLOBALS["$p_var_name|depending_match"]="${declaration_dict[$key]}"
+            GLOBALS["$p_var_name|value_if_true"]="${declaration_dict[true]}"
+            GLOBALS["$p_var_name|value_if_false"]="${declaration_dict[false]}"
+
+            case "$key" in
+              ifnot-*)
+                GLOBALS["$p_var_name|condition"]='ifnot'
+
+                # Debug.
+                # echo "$p_var_name ifnot : $depending_value == ${declaration_dict[$key]} ?"
+
+                if [[ "$depending_value" == "${declaration_dict[$key]}" ]]; then
+                  # Debug.
+                  # echo "  -> yes (abort)"
+                  # echo "  default = ${GLOBALS[$p_var_name|default]}"
+
+                  # return 0
+                  p_prevent_assignment='1'
+
+                  # debug
+                  # echo "$p_var_name prevented because condition ifnot does not match"
+                fi
+              ;;
+              if-*)
+                GLOBALS["$p_var_name|condition"]='if'
+
+                # Debug.
+                # echo "$p_var_name if : $depending_value != ${declaration_dict[$key]} ?"
+
+                if [[ "$depending_value" != "${declaration_dict[$key]}" ]]; then
+                  # Debug.
+                  # echo "  -> yes (abort)"
+                  # echo "  default = ${GLOBALS[$p_var_name|default]}"
+
+                  # return 0
+                  p_prevent_assignment='1'
+
+                  # debug
+                  # echo "$p_var_name prevented because condition if does not match"
+                fi
+              ;;
+            esac
+          ;;
+
+          # Appends multiple values to the same var. Allow globals to be
+          # declared multiple times to add values (space-separated string).
+          append)
+            # Ability to scope values in different "piles" using the 'to' key.
+            # Defaults to 'values'.
+            local append_to='values'
+
+            if [[ -n "${declaration_dict[to]}" ]]; then
+              append_to="${declaration_dict[to]}"
+            fi
+
+            if [[ -n "${GLOBALS[$p_var_name|values]}" ]]; then
+              GLOBALS["${p_var_name}|$append_to"]+=" ${declaration_dict[$key]}"
+            else
+              GLOBALS["${p_var_name}|$append_to"]="${declaration_dict[$key]}"
+            fi
+          ;;
+
+          # For 'append' using the 'to' key, we need to easily fetch all "piles"
+          # (all values that were used in 'to').
+          to)
+            if [[ -n "${GLOBALS[$p_var_name|tos]}" ]]; then
+              GLOBALS["${p_var_name}|tos"]+=" ${declaration_dict[$key]}"
+            else
+              GLOBALS["${p_var_name}|tos"]="${declaration_dict[$key]}"
+            fi
+          ;;
+
+          # Default.
+          *)
+            GLOBALS["${p_var_name}|${key}"]="${declaration_dict[$key]}"
+          ;;
+        esac
+      done
+    fi
+  fi
+
+  # Prevent conditional assignment (and the rest of the processing below if no
+  # match was found above) if the global using a condition does not require
+  # deferred assignment.
+  # For conditional global values requiring default value(s), they MUST use the
+  # deferred assignment. Ex :
+  # global SERVER_DOCROOT_C "[if-SERVER_DOCROOT]='$APP_DOCROOT/docroot' [true]=/var/www/html/docroot [false]=/var/www/html/web [index]=1"
+  if [[ ! $index -gt 0 ]] && [[ -n "${GLOBALS[$p_var_name|condition]}" ]]; then
+    unset GLOBALS["$p_var_name|condition"]
+    if [[ -n "$p_prevent_assignment" ]]; then
+      return 0
+    fi
+  fi
+
+  # Because it's possible to call global() several times for the same variable
+  # (e.g. to append values to a list), and because the declaration order may
+  # matter, we need to keep a list (and count) of unique variable names.
+  if ! f_in_array "$p_var_name" GLOBALS_UNIQUE_NAMES; then
+    ((++GLOBALS_COUNT))
+    GLOBALS_UNIQUE_NAMES+=("$p_var_name")
+
+    # This will be used to sort the array when complete.
+    # See https://stackoverflow.com/a/39543809
+    GLOBALS[".sorting"]+=" ${GLOBALS_COUNT}|${p_var_name} "
+  fi
+
+  # Provide control over value assignation order. Higher = later.
+  if [[ $index -gt ${GLOBALS['.defer-max']} ]]; then
+    GLOBALS['.defer-max']=$index
+  fi
+
+  # Always defer global var declaration weighting more than 0 (default).
+  # NB : the 1st declaration of multiple 'append' global() calls for the same
+  # variable determines the index for all subsequent calls.
+  if [[ $index -gt 0 ]]; then
+    p_prevent_assignment='1'
+
+    # debug
+    # echo "$p_var_name prevented because deferred index = $index"
+
+    if ! f_in_array "$p_var_name" GLOBALS_DEFERRED; then
+      GLOBALS_DEFERRED+=("$p_var_name")
+    fi
+  # When previous declaration asked for deferred assignation, respect it even
+  # in subsequent declarations not specifying an index.
+  # TODO when the 1st declaration does not trigger deferred assignation and
+  # subsequent calls do, workaround : "unexport" ?
+  elif f_in_array "$p_var_name" GLOBALS_DEFERRED; then
+
+    # debug
+    # echo "$p_var_name prevented because previously put in GLOBALS_DEFERRED : '$GLOBALS_DEFERRED'"
+
+    p_prevent_assignment='1'
+  fi
+
+  # Immediately attempt to export that variable unless explicitly prevented.
+  # This allows conditional declarations in them (i.e. useful for settings that
+  # need to adapt/react to each other).
+  if [[ -z "$p_prevent_assignment" ]]; then
+    f_global_assign_value "$p_var_name"
+
+  # When global var declaration is deferred, append to 1 list per index.
+  # @see asc/stack/init/aggregate_env_vars.sh
+  elif [[ "$index" -gt '0' ]]; then
+    # We only need 1 assignation -> skip if already in list.
+    case "${GLOBALS[.defer-$index]}" in
+      *"${p_var_name}"*) return ;;
+    esac
+    GLOBALS[".defer-$index"]+=" ${p_var_name} "
+  fi
+}

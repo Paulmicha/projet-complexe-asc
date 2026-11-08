@@ -3,48 +3,220 @@
 ##
 # (over)Writes Git hooks to use ASC hooks.
 #
-# Applies to folder "$APP_DOCROOT/.git/hooks" if it exists, otherwise to
-# "$PROJECT_DOCROOT/.git/hooks".
+# When executed as a script, bootstraps ASC then writes.
+# When sourced, only defines f_git_write_hooks().
 #
-# ASC hook triggers will have the following format :
-# $ hook -s 'git' -a "$git_hook" -v 'STACK_VERSION PROVISION_USING HOST_TYPE INSTANCE_TYPE'
-#
-# TODO [evol] Examine opt-in alternative to use a custom value for "git config
-# core.hooksPath" (instead of just generating scripts in "$GIT_DIR/hooks").
-#
+# @see f_instance_init() in asc/instance/instance.inc.sh
 # @see https://git-scm.com/docs/githooks
 #
-# @param 1 [optional] String : the space-separated Git hooks to (over)write.
-#   Defaults to the following selection (when value is absent or empty) :
-#   - 'pre-applypatch' : used to inspect the current working tree and refuse to
-#     make a commit (exits with non-zero status) if it does not pass certain
-#     test(s).
-#   - 'pre-commit' (see post-merge) : used for permissions/ownership, ACLS, etc.
-#     Prevents commit when exiting with a non-zero status. Can be bypassed with
-#     the 'git commit --no-verify' option.
-#   - 'post-checkout' : used to perform repository validity checks, auto-display
-#     differences from the previous HEAD if different, or set working dir
-#     metadata properties (e.g. permissions/ownership). The hook is given three
-#     parameters: the ref of the previous HEAD, the ref of the new HEAD (which
-#     may or may not have changed), and a flag indicating whether the checkout
-#     was a branch checkout (changing branches, flag=1) or a file checkout
-#     (retrieving a file from the index, flag=0).
-#   - 'post-merge' (see pre-commit) : used for permissions/ownership, ACLS, etc.
-#     The hook takes a single parameter, a status flag specifying whether or not
-#     the merge being done was a squash merge.
-#   - 'pre-push' : can be used to prevent a push from taking place (exit with a
-#     non-zero status). The hook is called with two parameters which provide the
-#     name and location of the destination remote, if a named remote is not
-#     being used both values will be the same.
-# @param 2 [optional] String : the Git hooks folder to use. Defaults to
-#   "$APP_DOCROOT/.git/hooks" if it exists, otherwise to
-#   "$PROJECT_DOCROOT/.git/hooks".
+# Paths must contain .git/hooks directories (Git worktree gitfiles unsupported).
+#
+# Tokens supported :
+# - pre-commit (instance repo),
+# - asc:pre-commit (explicit instance context),
+# - site:pre-commit (SITE_DOCROOT).
+#
+# Context names are shell identifiers.
+#
+# @param 1 [Optional] String : space-separated tokens. Empty uses the legacy six
+#   defaults. Instance init calls this only when ASC_GIT_HOOKS_WIRED is
+#   non-empty.
+# @param 2 [Optional] String : hooks directory, supported only with bare hook
+#   names.
 #
 # @example
 #   asc/git/write_hooks.sh
-#   asc/git/write_hooks.sh 'pre-commit post-merge'
-#   asc/git/write_hooks.sh '' /my/custom/path/to/.git/hooks
+#   asc/git/write_hooks.sh 'pre-commit site:post-merge'
 #
 
+##
+# The (over)writing function.
+#
+# Generated scripts run ASC from PROJECT_DOCROOT and expose git_hook_context,
+# git_hook_args_nb and git_hook_args to listeners on the git subject.
+#
+# Legacy APP_DOCROOT hooks bearing the generation marker are removed only after
+# successful writes, even if edited. Remove the marker to preserve such a file.
+#
+# @example
+#   . asc/git/write_hooks.sh
+#   f_git_write_hooks 'api:pre-commit site:post-merge'
+#
+f_git_write_hooks() {
+  local p_git_hooks="${1:-pre-applypatch pre-commit post-merge post-checkout pre-push post-receive}"
+  local p_git_hook_dir="${2:-}"
+  local git_hooks_whitelist_arr=()
+
+  git_hooks_whitelist_arr+=('applypatch-msg')
+  git_hooks_whitelist_arr+=('pre-applypatch')
+  git_hooks_whitelist_arr+=('post-applypatch')
+  git_hooks_whitelist_arr+=('pre-commit')
+  git_hooks_whitelist_arr+=('prepare-commit-msg')
+  git_hooks_whitelist_arr+=('commit-msg')
+  git_hooks_whitelist_arr+=('post-commit')
+  git_hooks_whitelist_arr+=('pre-rebase')
+  git_hooks_whitelist_arr+=('post-checkout')
+  git_hooks_whitelist_arr+=('post-merge')
+  git_hooks_whitelist_arr+=('pre-push')
+  git_hooks_whitelist_arr+=('pre-receive')
+  git_hooks_whitelist_arr+=('update')
+  git_hooks_whitelist_arr+=('post-update')
+  git_hooks_whitelist_arr+=('post-receive')
+  git_hooks_whitelist_arr+=('post-update')
+  git_hooks_whitelist_arr+=('push-to-checkout')
+  git_hooks_whitelist_arr+=('pre-auto-gc')
+  git_hooks_whitelist_arr+=('post-rewrite')
+  git_hooks_whitelist_arr+=('rebase')
+  git_hooks_whitelist_arr+=('sendemail-validate')
+  git_hooks_whitelist_arr+=('fsmonitor-watchman')
+
+  local token context name var dir owner path i old_path tmp project_quoted
+  local -a names=() contexts=() paths=() tokens=()
+  local -A directory_owners=() path_indexes=() written_paths=()
+
+  # Validate the whole list before any filesystem mutation.
+  for token in $p_git_hooks; do
+    context=''
+    name="$token"
+
+    if [[ "$token" == *:* ]]; then
+      context="${token%%:*}"
+      name="${token#*:}"
+
+      if [[ ! "$context" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || [[ -n "$p_git_hook_dir" ]]; then
+        echo "Invalid Git hook context or explicit-directory combination: $token" >&2
+        exit 2
+      fi
+    fi
+
+    if ! f_in_array "$name" git_hooks_whitelist_arr; then
+      echo "Invalid Git hook name: $token" >&2
+      exit 2
+    fi
+
+    tokens+=("$token")
+  done
+
+  for token in "${tokens[@]}"; do
+    context=''
+    name="$token"
+
+    if [[ "$token" == *:* ]]; then
+      context="${token%%:*}"
+      name="${token#*:}"
+    fi
+
+    owner="${context:-asc}"
+
+    case "$owner" in
+      asc) dir="${p_git_hook_dir:-$PROJECT_DOCROOT/.git/hooks}" ;;
+      *)
+        var="${context^^}_DOCROOT"
+
+        if [[ -z "${!var}" ]]; then
+          echo "Missing Git hook work tree: $var" >&2
+          exit 1
+        fi
+
+        dir="${!var}/.git/hooks"
+        ;;
+    esac
+
+    if [[ ! -d "$dir" ]] || ! dir="$(realpath -- "$dir")"; then
+      echo "Missing Git hooks directory: $dir" >&2
+      exit 1
+    fi
+
+    if [[ -n "${directory_owners[$dir]+x}" ]] \
+      && [[ "${directory_owners[$dir]}" != "$owner" ]]; then
+      echo "Conflicting Git hook contexts for $dir" >&2
+      exit 1
+    fi
+
+    directory_owners["$dir"]="$owner"
+    path="$dir/$name"
+
+    if [[ -n "${path_indexes[$path]+x}" ]]; then
+      i="${path_indexes[$path]}"
+      [[ "$context" == asc ]] && contexts[i]=asc
+      continue
+    fi
+
+    path_indexes["$path"]="${#paths[@]}"
+
+    paths+=("$path")
+    names+=("$name")
+    contexts+=("$context")
+  done
+
+  printf -v project_quoted '%q' "$PROJECT_DOCROOT"
+
+  for i in "${!paths[@]}"; do
+    path="${paths[i]}"
+    name="${names[i]}"
+    context="${contexts[i]}"
+
+    # Stage beside the destination so a failed create/chmod preserves its file.
+    tmp="$(mktemp "${path}.tmp.XXXXXXXX")" || exit 1
+
+    if ! cat > "$tmp" <<EOF
+#!/usr/bin/env bash
+
+##
+# Implements '$name' git hook.
+#
+# This file is automatically generated during "instance init", and it will be
+# entirely overwritten every time it is executed.
+#
+# @see asc/git/write_hooks.sh
+# @see f_instance_init() in asc/instance/instance.inc.sh
+#
+
+cd $project_quoted || exit 1
+
 . asc/bootstrap.sh
-f_git_write_hooks "$@"
+
+git_hook_context='$context'
+git_hook_args_nb="\$#"
+git_hook_args=("\$@")
+
+hook -s 'git' -a "$name" -v 'STACK_VERSION HOST_TYPE INSTANCE_TYPE'
+EOF
+    then
+      rm -f -- "$tmp"
+      exit 1
+    fi
+
+    if ! chmod +x "$tmp" || [[ -d "$path" ]] || ! mv -f -- "$tmp" "$path"; then
+      rm -f -- "$tmp"
+      echo "Unable to write Git hook: $path" >&2
+      exit 1
+    fi
+
+    written_paths["$(realpath -- "$path")"]=1
+
+    echo "(over)Writing git hook $path : done."
+  done
+
+  # Wait until every destination succeeds before removing any legacy hook.
+  if [[ -n "${APP_DOCROOT:-}" ]]; then
+    for name in "${names[@]}"; do
+      old_path="$APP_DOCROOT/.git/hooks/$name"
+
+      [[ -f "$old_path" ]] || continue
+
+      path="$(realpath -- "$old_path")" || exit 1
+
+      [[ -z "${written_paths[$path]+x}" ]] || continue
+
+      if grep -Fq 'automatically generated during "instance init"' "$old_path"; then
+        rm -f -- "$old_path" || exit 1
+      fi
+    done
+  fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  . asc/bootstrap.sh
+  f_git_write_hooks "$@"
+fi

@@ -5,7 +5,7 @@
 #
 # Verifies current instance can execute MySQL actions normally.
 #
-# @see f_test_batch_exec() in asc/test/test.inc.sh
+# @see f_test_batch_exec() in asc/test/test.opt-inc.sh
 #
 # @example
 #   make test-core

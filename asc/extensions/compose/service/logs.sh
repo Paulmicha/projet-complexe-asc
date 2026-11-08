@@ -4,16 +4,16 @@
 # Reads single Docker-compose service logs.
 #
 # @example
-#   make service-logs 'arangodb'
+#   make service-logs 'arcadedb'
 #   # Or :
-#   asc/extensions/compose/service/logs.sh 'arangodb'
+#   asc/extensions/compose/service/logs.sh 'arcadedb'
 #
 
 . asc/bootstrap.sh
 
-a_service="$1"
+p_service="$1"
 
-if [[ -z "$a_service" ]]; then
+if [[ -z "$p_service" ]]; then
   echo >&2
   echo "Error in $BASH_SOURCE line $LINENO: service name is required." >&2
   echo "-> Aborting (1)." >&2
@@ -21,4 +21,4 @@ if [[ -z "$a_service" ]]; then
   exit 1
 fi
 
-docker compose logs "$a_service"
+docker compose logs "$p_service"

@@ -17,11 +17,11 @@
 # implementations, convenience "make" shortcuts for all subjects & actions, etc.
 #
 # @see f_global_aggregate()
-# @see f_global_write()
-# @see f_make_generate()
+# @see f_global_write() in asc/core/global_write.sh
+# @see f_make_generate() in asc/make/generate.sh
 #
 # Default values :
-# @see asc/env/global.vars.sh
+# @see asc/core/global.vars.sh
 #
 # Gotcha : when calling this function in an already initialized instance, given
 # its design, every 'append' type globals values would pile-up, creating
@@ -34,46 +34,43 @@
 #   f_instance_init
 #
 #   # Initializes an instance of type 'dev', host type 'local', provisionned
-#   # using 'ansible', using 'my-project-2025' as stack version, with git origin :
-#   # 'git@my-git-origin.org:my-git-account/asc.git', app sources cloned in 'dist',
-#   # and using 'dist/web' as app dir - without terminal prompts (-y flag).
+#   # using 'ansible', with apps 'site api', without prompts (-y flag).
+#   # Each app may provide its own clone.hook.sh to create its repository.
 #   f_instance_init \
 #     -t 'dev' \
 #     -h 'local' \
 #     -p 'ansible' \
 #     -s 'asc_dev' \
-#     -g 'git@my-git-origin.org:my-git-account/asc.git' \
-#     -i 'dist' \
-#     -a 'dist/web' \
+#     -a 'site api' \
 #     -y
 #
 f_instance_init() {
   local app=''
 
   # Absolute path to project docroot.
-  local a_ascii_project_docroot=''
+  local p_ascii_project_docroot=''
 
   # Stack version allows stack upgrades (e.g. switching compose files_arr).
-  local a_ascii_stack_version=''
+  local p_ascii_stack_version=''
 
   # Space-separated list of "apps" of components (e.g. 'site api cas').
-  local a_ascii_apps=''
+  local p_ascii_apps=''
 
   # Host type usually is 'local' or 'remote'.
-  local a_ascii_host_type=''
+  local p_ascii_host_type=''
 
   # Instance type usually is 'dev' or 'prod'.
-  local a_ascii_instance_type=''
+  local p_ascii_instance_type=''
 
   # Some variants may play on the provisionning tool, if any (i.e. docker
   # compose).
-  local a_ascii_provision_using=''
+  local p_ascii_provision_using=''
 
   # Flag to bypass interactive terminal prompts (input and/or confirmation).
-  local a_ascii_yes=0
+  local p_ascii_yes=0
 
   # Flag to test the aggregation process without writing anything.
-  local a_ascii_dry_run=0
+  local p_ascii_dry_run=0
 
   # Reads values optionally provided in YAML files placed in PROJECT_DOCROOT.
   # - yaml_parsed_sp_init contains a subset of vars - the default values,
@@ -106,56 +103,56 @@ f_instance_init() {
       # for the globals aggregation process (e.g. values depending on instance
       # type - dev, prod, or dependening on stack version, etc).
       if [[ -n "$YAML_PROJECT_DOCROOT" ]]; then
-        a_ascii_project_docroot="$YAML_PROJECT_DOCROOT"
+        p_ascii_project_docroot="$YAML_PROJECT_DOCROOT"
       fi
 
       if [[ -n "$YAML_STACK_VERSION" ]]; then
-        a_ascii_stack_version="$YAML_STACK_VERSION"
+        p_ascii_stack_version="$YAML_STACK_VERSION"
       fi
 
       if [[ -n "$YAML_ASC_APPS" ]]; then
-        a_ascii_apps="$YAML_ASC_APPS"
+        p_ascii_apps="$YAML_ASC_APPS"
       fi
 
       if [[ -n "$YAML_HOST_TYPE" ]]; then
-        a_ascii_host_type="$YAML_HOST_TYPE"
+        p_ascii_host_type="$YAML_HOST_TYPE"
       fi
 
       if [[ -n "$YAML_INSTANCE_TYPE" ]]; then
-        a_ascii_instance_type="$YAML_INSTANCE_TYPE"
+        p_ascii_instance_type="$YAML_INSTANCE_TYPE"
       fi
 
       if [[ -n "$YAML_PROVISION_USING" ]]; then
-        a_ascii_provision_using="$YAML_PROVISION_USING"
+        p_ascii_provision_using="$YAML_PROVISION_USING"
       fi
     fi
   fi
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -o) a_ascii_project_docroot="$2"; shift 2;;
-      -s) a_ascii_stack_version="$2"; shift 2;;
-      -a) a_ascii_apps="$2"; shift 2;;
-      -h) a_ascii_host_type="$2"; shift 2;;
-      -t) a_ascii_instance_type="$2"; shift 2;;
-      -p) a_ascii_provision_using="$2"; shift 2;;
-      -y) a_ascii_yes=1; shift 1;;
-      -r) a_ascii_dry_run=1; shift 1;;
+      -o) p_ascii_project_docroot="$2"; shift 2;;
+      -s) p_ascii_stack_version="$2"; shift 2;;
+      -a) p_ascii_apps="$2"; shift 2;;
+      -h) p_ascii_host_type="$2"; shift 2;;
+      -t) p_ascii_instance_type="$2"; shift 2;;
+      -p) p_ascii_provision_using="$2"; shift 2;;
+      -y) p_ascii_yes=1; shift 1;;
+      -r) p_ascii_dry_run=1; shift 1;;
       -*) echo "Error in $BASH_SOURCE line $LINENO: unknown option: $1" >&2; return;;
       *) echo "Notice in $BASH_SOURCE line $LINENO: unsupported unnamed argument: $1" >&2; shift 1;;
     esac
   done
 
-  if [[ -n "$a_ascii_project_docroot" ]]; then
-    PROJECT_DOCROOT="$a_ascii_project_docroot"
+  if [[ -n "$p_ascii_project_docroot" ]]; then
+    PROJECT_DOCROOT="$p_ascii_project_docroot"
   fi
 
-  if [[ -n "$a_ascii_stack_version" ]]; then
-    STACK_VERSION="$a_ascii_stack_version"
+  if [[ -n "$p_ascii_stack_version" ]]; then
+    STACK_VERSION="$p_ascii_stack_version"
   fi
 
-  if [[ -n "$a_ascii_apps" ]]; then
-    ASC_APPS="$a_ascii_apps"
+  if [[ -n "$p_ascii_apps" ]]; then
+    ASC_APPS="$p_ascii_apps"
 
     # for app in $ASC_APPS; do
     #   # "YAML_${app}_DOCROOT"
@@ -167,16 +164,16 @@ f_instance_init() {
     # done
   fi
 
-  if [[ -n "$a_ascii_host_type" ]]; then
-    HOST_TYPE="$a_ascii_host_type"
+  if [[ -n "$p_ascii_host_type" ]]; then
+    HOST_TYPE="$p_ascii_host_type"
   fi
 
-  if [[ -n "$a_ascii_instance_type" ]]; then
-    INSTANCE_TYPE="$a_ascii_instance_type"
+  if [[ -n "$p_ascii_instance_type" ]]; then
+    INSTANCE_TYPE="$p_ascii_instance_type"
   fi
 
-  if [[ -n "$a_ascii_provision_using" ]]; then
-    PROVISION_USING="$a_ascii_provision_using"
+  if [[ -n "$p_ascii_provision_using" ]]; then
+    PROVISION_USING="$p_ascii_provision_using"
   fi
 
   # Debug.
@@ -194,7 +191,12 @@ f_instance_init() {
 
   # Load default ASC 'core' globals.
   # These contain paths required for aggregating env vars and services.
-  . asc/env/global.vars.sh
+  # `global()` lives in opt-inc; source before env/global.vars.sh (not a subject).
+  if [[ "$(type -t global)" != function ]]; then
+    # shellcheck disable=SC1091
+    . asc/core/global.manual-inc.sh
+  fi
+  . asc/core/global.vars.sh
 
   # Any global vars defined in YAML takes precedence. Use the dynamic lookup now
   # that we have values for HOST_TYPE and INSTANCE_TYPE (for variants).
@@ -225,6 +227,7 @@ f_instance_init() {
 
   # If used, loop through ASC_APPS.
   # Default to 'app' otherwise.
+  local subject
   local subjects='app'
 
   if [[ -n "$ASC_APPS" ]]; then
@@ -233,19 +236,39 @@ f_instance_init() {
 
   # If we want to test instance init (when "dry run" flag is set), nothing is
   # written and hooks are replaced by a prefixed variant.
-  if [[ $a_ascii_dry_run -eq 1 ]]; then
+  if [[ $p_ascii_dry_run -eq 1 ]]; then
+    . asc/core/global_debug.sh
+
     f_global_debug
+
+    for subject in $subjects; do
+      hook -s "$subjects" -a 'clone' -v 'STACK_VERSION HOST_TYPE INSTANCE_TYPE' -p 'dry_run'
+    done
+
     hook -a 'init' -v 'STACK_VERSION PROVISION_USING HOST_TYPE INSTANCE_TYPE' -p 'dry_run'
     hook -s "$subjects instance" -a 'ensure_dirs_exist' -p 'dry_run'
+
     return
   fi
 
+  . asc/core/global_write.sh
+
   f_global_write
+
+  if [[ "$(type -t f_make_generate)" != function ]]; then
+    # shellcheck disable=SC1091
+    . asc/make/generate.sh
+  fi
 
   f_make_generate
 
   # Trigger instance init (optional) extra processes.
   hook -p 'pre' -a 'init'
+
+  for subject in $subjects; do
+    hook_ms -s "$subject" -a 'clone' -v 'STACK_VERSION HOST_TYPE INSTANCE_TYPE' || return $?
+  done
+
   hook -a 'init' -v 'STACK_VERSION PROVISION_USING HOST_TYPE INSTANCE_TYPE'
 
   # Make sure every writeable folders potentially git-ignored gets created
@@ -294,15 +317,18 @@ f_instance_yaml_config_load() {
 
   # Start by looking for any declarations in ASC dirs (with variants).
   hook_dry_run_matches=''
+
   # make hook-debug s:instance a:env c:yml v:STACK_VERSION HOST_TYPE INSTANCE_TYPE
   hook -s 'instance' -a 'env' -c 'yml' -v 'STACK_VERSION HOST_TYPE INSTANCE_TYPE' -t -r
+
   for instance_yaml_config_file in $hook_dry_run_matches; do
     f_instance_yaml_config_parse "$instance_yaml_config_file"
   done
 
   # Also support PROJECT_DOCROOT env.yml files variations, as well as local,
   # git-ignored declarations in PROJECT_DOCROOT (last loaded take precedence).
-  instance_yaml_config_root_files="env.$INSTANCE_TYPE.yml
+  instance_yaml_config_root_files="env.$HOST_TYPE.yml
+env.$INSTANCE_TYPE.yml
 env.$STACK_VERSION.yml
 env.$HOST_TYPE.$INSTANCE_TYPE.yml
 env.$STACK_VERSION.$HOST_TYPE.yml
@@ -316,6 +342,7 @@ env.$STACK_VERSION.$HOST_TYPE.$INSTANCE_TYPE.yml
 .env-local.$STACK_VERSION.$HOST_TYPE.yml
 .env-local.$STACK_VERSION.$INSTANCE_TYPE.yml
 .env-local.$STACK_VERSION.$HOST_TYPE.$INSTANCE_TYPE.yml"
+
   for instance_yaml_config_file in $instance_yaml_config_root_files; do
     if [[ -f "$instance_yaml_config_file" ]]; then
       f_instance_yaml_config_parse "$instance_yaml_config_file"
@@ -358,6 +385,7 @@ f_instance_yaml_config_parse() {
   local parsed_var_leaf=''
   local parsed_val=''
   local parsed_asc_apps=''
+  local parsed_yaml_str=''
   local app=''
 
   if [[ ! -f "$yaml_config_filepath" ]]; then
@@ -372,6 +400,7 @@ f_instance_yaml_config_parse() {
   # echo "u_instance_yaml_config_parse('$yaml_config_filepath')"
 
   # TODO [evol] support lists (convert to [append] in globals declarations) ?
+  f_yaml_parse "$yaml_config_filepath" 'yaml_' 'parsed_yaml_str'
   while IFS= read -r parsed_line _; do
     parsed_val="$(echo "$parsed_line" | awk -F '[()]' '{print $2}')"
     parsed_var_leaf="=${parsed_line#*=}"
@@ -433,7 +462,7 @@ f_instance_yaml_config_parse() {
 
     yaml_parsed_globals+="global $parsed_var $parsed_val ; "
 
-  done < <(f_yaml_parse "$yaml_config_filepath" 'yaml_')
+  done <<< "$parsed_yaml_str"
 }
 
 ##
@@ -688,14 +717,14 @@ f_instance_get_ownership() {
 #   echo "instance_domain = $instance_domain"
 #
 f_instance_domain() {
-  local a_local_host_name="$1"
+  local p_local_host_name="$1"
 
-  if [[ -z "$a_local_host_name" ]]; then
-    a_local_host_name="$(f_host_ip)"
+  if [[ -z "$p_local_host_name" ]]; then
+    f_host_ip 'p_local_host_name'
   fi
 
-  case "$a_local_host_name" in "192.168."*)
-    a_local_host_name="${a_local_host_name//192.168./lan-}"
+  case "$p_local_host_name" in "192.168."*)
+    p_local_host_name="${p_local_host_name//192.168./lan-}"
   esac
 
   # The dir name is slugified + we remove any '-dev-stack' suffix + lowercase.
@@ -704,9 +733,9 @@ f_instance_domain() {
   dirname="${dirname//-dev-stack/}"
   f_str_lowercase "$dirname" 'dirname'
 
-  if [[ -n "$a_local_host_name" ]]; then
-    a_local_host_name="${a_local_host_name//./-}"
-    echo "${dirname}.host-${a_local_host_name}.localhost"
+  if [[ -n "$p_local_host_name" ]]; then
+    p_local_host_name="${p_local_host_name//./-}"
+    echo "${dirname}.host-${p_local_host_name}.localhost"
     return
   fi
 
@@ -825,16 +854,16 @@ f_instance_registry_del() {
 #   fi
 #
 f_instance_once() {
-  local a_flag="$1"
+  local p_flag="$1"
 
   # TODO check what happens in case of unexpected collisions (if that var
   # already exists in calling scope).
   local reg_val
 
-  f_instance_registry_get "$a_flag"
+  f_instance_registry_get "$p_flag"
 
   if [[ $reg_val -ne 1 ]]; then
-    f_instance_registry_set "$a_flag"
+    f_instance_registry_set "$p_flag"
     return
   fi
 

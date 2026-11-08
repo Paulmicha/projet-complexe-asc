@@ -39,31 +39,31 @@
 #   f_remote_download 'my_short_id' /remote/file.ext /local/dir/
 #
 f_remote_download() {
-  local a_id="$1"
-  local a_remote_path="$2"
-  local a_local_path="$3"
+  local p_id="$1"
+  local p_remote_path="$2"
+  local p_local_path="$3"
   shift 3
 
-  f_remote_instance_load "$a_id"
+  f_remote_instance_load "$p_id"
 
   if [[ -z "$REMOTE_INSTANCE_SSH_CONNECT_CMD" ]]; then
     echo >&2
-    echo "Error in $BASH_SOURCE line $LINENO: no conf found for remote id '$a_id'." >&2
+    echo "Error in $BASH_SOURCE line $LINENO: no conf found for remote id '$p_id'." >&2
     echo "-> Aborting (1)." >&2
     echo >&2
     return 1
   fi
 
   # Handle relative paths.
-  if [[ "${a_local_path:0:1}" != '/' ]]; then
-    a_local_path="$PROJECT_DOCROOT/$a_local_path"
+  if [[ "${p_local_path:0:1}" != '/' ]]; then
+    p_local_path="$PROJECT_DOCROOT/$p_local_path"
   fi
-  if [[ "${a_remote_path:0:1}" != '/' ]]; then
-    a_remote_path="$REMOTE_INSTANCE_DOCROOT/$a_remote_path"
+  if [[ "${p_remote_path:0:1}" != '/' ]]; then
+    p_remote_path="$REMOTE_INSTANCE_DOCROOT/$p_remote_path"
   fi
 
   # Make sure local dir exists.
-  local local_dir="$a_local_path"
+  local local_dir="$p_local_path"
   if [[ ! "${local_dir:(-1)}" = '/' ]]; then
     local_dir="${local_dir%/*}"
   fi
@@ -80,11 +80,11 @@ f_remote_download() {
   # Debug.
   if [[ -n "$DEBUG_MODE" ]]; then
     echo "u_remote_download() debug mode - command :"
-    echo "  scp $REMOTE_INSTANCE_PREFIX:$a_remote_path $a_local_path $@"
+    echo "  scp $REMOTE_INSTANCE_PREFIX:$p_remote_path $p_local_path $@"
     return
   fi
 
-  scp "$REMOTE_INSTANCE_PREFIX:$a_remote_path" "$a_local_path" "$@"
+  scp "$REMOTE_INSTANCE_PREFIX:$p_remote_path" "$p_local_path" "$@"
 
   if [[ $? -ne 0 ]]; then
     if [[ -z "$remote_download_skip_errors" ]]; then
@@ -126,47 +126,47 @@ f_remote_download() {
 #   f_remote_upload 'my_short_id' /path/to/file.ext /remote/dir/ --ignore-existing
 #
 f_remote_upload() {
-  local a_id="$1"
-  local a_local_path="$2"
-  local a_remote_path="$3"
+  local p_id="$1"
+  local p_local_path="$2"
+  local p_remote_path="$3"
   shift 3
 
-  f_remote_instance_load "$a_id"
+  f_remote_instance_load "$p_id"
 
   if [[ -z "$REMOTE_INSTANCE_SSH_CONNECT_CMD" ]]; then
     echo >&2
-    echo "Error in f_remote_upload() - $BASH_SOURCE line $LINENO: no conf found for remote id '$a_id'." >&2
+    echo "Error in f_remote_upload() - $BASH_SOURCE line $LINENO: no conf found for remote id '$p_id'." >&2
     echo "-> Aborting (1)." >&2
     echo >&2
     return 1
   fi
 
   # Handle relative paths.
-  if [[ "${a_local_path:0:1}" != '/' ]]; then
-    a_local_path="$PROJECT_DOCROOT/$a_local_path"
+  if [[ "${p_local_path:0:1}" != '/' ]]; then
+    p_local_path="$PROJECT_DOCROOT/$p_local_path"
   fi
-  if [[ "${a_remote_path:0:1}" != '/' ]]; then
-    a_remote_path="$REMOTE_INSTANCE_DOCROOT/$a_remote_path"
+  if [[ "${p_remote_path:0:1}" != '/' ]]; then
+    p_remote_path="$REMOTE_INSTANCE_DOCROOT/$p_remote_path"
   fi
 
   if [[ "$1" == '--ignore-existing' ]]; then
     # Debug.
     if [[ -n "$DEBUG_MODE" ]]; then
       echo "u_remote_upload() debug mode - command :"
-      echo "  rsync -vau $a_local_path $REMOTE_INSTANCE_PREFIX:${a_remote_path}"
+      echo "  rsync -vau $p_local_path $REMOTE_INSTANCE_PREFIX:${p_remote_path}"
       return
     fi
 
-    rsync -vau "$a_local_path" "$REMOTE_INSTANCE_PREFIX:${a_remote_path}"
+    rsync -vau "$p_local_path" "$REMOTE_INSTANCE_PREFIX:${p_remote_path}"
   else
     # Debug.
     if [[ -n "$DEBUG_MODE" ]]; then
       echo "u_remote_upload() debug mode - command :"
-      echo "  scp $a_local_path $REMOTE_INSTANCE_PREFIX:${a_remote_path} $@"
+      echo "  scp $p_local_path $REMOTE_INSTANCE_PREFIX:${p_remote_path} $@"
       return
     fi
 
-    scp "$a_local_path" "$REMOTE_INSTANCE_PREFIX:${a_remote_path}" $@
+    scp "$p_local_path" "$REMOTE_INSTANCE_PREFIX:${p_remote_path}" $@
   fi
 
   if [[ $? -ne 0 ]]; then
@@ -194,14 +194,14 @@ f_remote_upload() {
 #   f_remote_exec_wrapper my_short_id asc/test/asc/global.test.sh
 #
 f_remote_exec_wrapper() {
-  local a_id="$1"
+  local p_id="$1"
   shift 1
 
-  f_remote_instance_load "$a_id"
+  f_remote_instance_load "$p_id"
 
   if [[ -z "$REMOTE_INSTANCE_SSH_CONNECT_CMD" ]]; then
     echo >&2
-    echo "Error in f_remote_exec_wrapper() - $BASH_SOURCE line $LINENO: no SSH connection defined for remote id '$a_id'." >&2
+    echo "Error in f_remote_exec_wrapper() - $BASH_SOURCE line $LINENO: no SSH connection defined for remote id '$p_id'." >&2
     echo "-> Aborting (1)." >&2
     echo >&2
     return 1
@@ -283,37 +283,37 @@ f_remote_exec_wrapper() {
 #   echo "$tokens_replaced" # yields for example : '2024-07-25.11-16-11_site_foobar.com'
 #
 f_remote_definition_tokens_replace() {
-  local a_remote_id="$1"
-  local a_input_str="$2"
-  local a_circuit_breaker=0
+  local p_remote_id="$1"
+  local p_input_str="$2"
+  local p_circuit_breaker=0
 
-  if [[ -z "$a_remote_id" ]]; then
+  if [[ -z "$p_remote_id" ]]; then
     echo >&2
-    echo "Error in f_remote_definition_tokens_replace() - $BASH_SOURCE line $LINENO: param 1 (a_remote_id) is required." >&2
+    echo "Error in f_remote_definition_tokens_replace() - $BASH_SOURCE line $LINENO: param 1 (p_remote_id) is required." >&2
     echo "-> Aborting (1)." >&2
     echo >&2
     return 1
   fi
 
-  if [[ -z "$a_input_str" ]]; then
+  if [[ -z "$p_input_str" ]]; then
     echo >&2
-    echo "Error in f_remote_definition_tokens_replace() - $BASH_SOURCE line $LINENO: param 2 (a_input_str) is required." >&2
+    echo "Error in f_remote_definition_tokens_replace() - $BASH_SOURCE line $LINENO: param 2 (p_input_str) is required." >&2
     echo "-> Aborting (2)." >&2
     echo >&2
     return 2
   fi
 
-  if [[ $3 -gt $a_circuit_breaker ]]; then
-    a_circuit_breaker=$3
+  if [[ $3 -gt $p_circuit_breaker ]]; then
+    p_circuit_breaker=$3
   fi
 
   # Only load remote instance definitions if necessary.
-  if [[ -z "$REMOTE_INSTANCE_ID" ]] || [[ "$REMOTE_INSTANCE_ID" != "$a_remote_id"  ]]; then
-    f_remote_instance_load "$a_remote_id"
+  if [[ -z "$REMOTE_INSTANCE_ID" ]] || [[ "$REMOTE_INSTANCE_ID" != "$p_remote_id"  ]]; then
+    f_remote_instance_load "$p_remote_id"
   fi
 
   # Start with the raw input, which we will gradually transform below.
-  tokens_replaced="$a_input_str"
+  tokens_replaced="$p_input_str"
 
   # First, any value from the same definition can be used directly as a token.
   local var=''
@@ -350,6 +350,10 @@ f_remote_definition_tokens_replace() {
   done
 
   # Same for any global var.
+  if [[ "$(type -t f_global_list)" != function ]]; then
+    # shellcheck disable=SC1091
+    . asc/core/global.manual-inc.sh
+  fi
   f_global_list
 
   for var in "${asc_globals_var_names_arr[@]}"; do
@@ -391,9 +395,9 @@ f_remote_definition_tokens_replace() {
   # There are tokens that may point to values that also contain tokens.
   case "$tokens_replaced" in *'{{ '*)
     # Up to 9 recursions is probably more than enough.
-    if [[ $a_circuit_breaker -lt 10 ]]; then
-      a_circuit_breaker+=1
-      f_remote_definition_tokens_replace "$a_remote_id" "$tokens_replaced" $a_circuit_breaker
+    if [[ $p_circuit_breaker -lt 10 ]]; then
+      p_circuit_breaker+=1
+      f_remote_definition_tokens_replace "$p_remote_id" "$tokens_replaced" $p_circuit_breaker
     else
       echo >&2
       echo "Error : breaking out of f_remote_definition_tokens_replace() recursion." >&2
@@ -510,14 +514,14 @@ f_remote_definition_tokens_replace() {
 #   f_remote_instances_setup
 #
 #   # Will (re)generate the following files :
-#   # - data/asc/remote-instances/dev.sh
-#   # - data/asc/remote-instances/dev_node.sh
-#   # - data/asc/remote-instances/staging.sh
-#   # - data/asc/remote-instances/staging_node.sh
-#   # - data/asc/remote-instances/prod.sh
-#   # - data/asc/remote-instances/prod_node.sh
+#   # - data/asc/cache/entities/remote_instance/dev.sh
+#   # - data/asc/cache/entities/remote_instance/dev_node.sh
+#   # - data/asc/cache/entities/remote_instance/staging.sh
+#   # - data/asc/cache/entities/remote_instance/staging_node.sh
+#   # - data/asc/cache/entities/remote_instance/prod.sh
+#   # - data/asc/cache/entities/remote_instance/prod_node.sh
 #
-#   # Example content - e.g. of file data/asc/remote-instances/dev.sh :
+#   # Example content - e.g. of file data/asc/cache/entities/remote_instance/dev.sh :
 #   export REMOTE_INSTANCE_DOCROOT='/var/www/drupal/root'
 #   export REMOTE_INSTANCE_DOMAIN='dev.foobar.com'
 #   export REMOTE_INSTANCE_DUMPS_DEFAULT_BASE_DIR='/var/www/drupal/dump'
@@ -552,8 +556,23 @@ f_remote_instances_setup() {
     return
   fi
 
+  local cache_dir='data/asc/cache/entities/remote_instance'
+  local parsed_file="${cache_dir}/_parsed.sh"
+
+  if [[ ! -d "$cache_dir" ]]; then
+    mkdir -p "$cache_dir"
+
+    if [[ $? -ne 0 ]]; then
+      echo >&2
+      echo "Error in $BASH_SOURCE line $LINENO: failed to create missing required dir ${cache_dir}." >&2
+      echo "-> Aborting (1)." >&2
+      echo >&2
+      return 1
+    fi
+  fi
+
   # (Re)init destination file (make empty).
-  cat > 'data/asc/remote-instances.sh' <<EOF
+  cat > "$parsed_file" <<EOF
 #!/usr/bin/env bash
 
 ##
@@ -571,12 +590,13 @@ f_remote_instances_setup() {
 EOF
 
   # Write remotes definitions.
-  local parsed_yaml_remotes="$(f_yaml_parse "$most_specific_match" 'ascri_')"
-  echo "$parsed_yaml_remotes" >> 'data/asc/remote-instances.sh'
+  local parsed_yaml_remotes=''
+  f_yaml_parse "$most_specific_match" 'ascri_' 'parsed_yaml_remotes'
+  echo "$parsed_yaml_remotes" >> "$parsed_file"
 
   # Process & adapt parsed result for use with f_remote_instance_load().
-  if [[ -f 'data/asc/remote-instances.sh' ]]; then
-    . data/asc/remote-instances.sh
+  if [[ -f "$parsed_file" ]]; then
+    . "$parsed_file"
 
     local remote_id
     local var_prefix
@@ -697,19 +717,7 @@ EOF
       fi
 
       # Finally, create the resulting definition file.
-      if [[ ! -d 'data/asc/remote-instances' ]]; then
-        mkdir -p 'data/asc/remote-instances'
-
-        if [[ $? -ne 0 ]]; then
-          echo >&2
-          echo "Error in $BASH_SOURCE line $LINENO: failed to create missing required dir data/asc/remote-instances." >&2
-          echo "-> Aborting (1)." >&2
-          echo >&2
-          return 1
-        fi
-      fi
-
-      local conf="data/asc/remote-instances/${remote_id}.sh"
+      local conf="${cache_dir}/${remote_id}.sh"
 
       cat > "$conf" <<EOF
 #!/usr/bin/env bash
@@ -840,44 +848,44 @@ f_remote_definition_get_keys() {
 #   echo "remote_dir = $remote_dir"
 #
 f_remote_definition_get_key() {
-  local a_remote_id="$1"
-  local a_key="$2"
-  local a_rdgk_var="$3"
-  local a_skip_token_replacement="$4"
+  local p_remote_id="$1"
+  local p_key="$2"
+  local p_rdgk_var="$3"
+  local p_skip_token_replacement="$4"
 
-  if [[ -z "$a_rdgk_var" ]]; then
-    a_rdgk_var="$a_key"
+  if [[ -z "$p_rdgk_var" ]]; then
+    p_rdgk_var="$p_key"
   fi
 
   # Only load the remote instance definition if not already loaded.
-  if [[ -z "$REMOTE_INSTANCE_ID" || "$REMOTE_INSTANCE_ID" != "$a_remote_id" ]]; then
-    f_remote_instance_load "$a_remote_id"
+  if [[ -z "$REMOTE_INSTANCE_ID" || "$REMOTE_INSTANCE_ID" != "$p_remote_id" ]]; then
+    f_remote_instance_load "$p_remote_id"
   fi
 
   local var=''
   local val=''
   local KEY=''
 
-  f_str_uppercase "$a_key" 'KEY'
+  f_str_uppercase "$p_key" 'KEY'
 
   var="REMOTE_INSTANCE_$KEY"
   val="${!var}"
 
   # Skip tokens if empty.
   if [[ -z "$val" ]]; then
-    printf -v "$a_rdgk_var" '%s' ""
+    printf -v "$p_rdgk_var" '%s' ""
     return
   fi
 
   # Replace tokens.
-  if [[ -z "$a_skip_token_replacement" ]]; then
+  if [[ -z "$p_skip_token_replacement" ]]; then
     local tokens_replaced=''
-    f_remote_definition_tokens_replace "$a_remote_id" "$val"
+    f_remote_definition_tokens_replace "$p_remote_id" "$val"
 
     # Write result to var in calling scope.
-    printf -v "$a_rdgk_var" '%s' "$tokens_replaced"
+    printf -v "$p_rdgk_var" '%s' "$tokens_replaced"
   else
-    printf -v "$a_rdgk_var" '%s' "$val"
+    printf -v "$p_rdgk_var" '%s' "$val"
   fi
 }
 
@@ -886,25 +894,28 @@ f_remote_definition_get_key() {
 #
 # @param 1 [optional] String : remote instance's id (short name, no space,
 #   _a-zA-Z0-9 only). Defaults to the first *.sh file found in folder :
-#   data/asc/remote-instances.
+#   data/asc/cache/entities/remote_instance (skips types.sh, instances.sh,
+#   _parsed.sh).
 #
 # @example
 #   # Only need to call the function for exporting globals in current shell :
 #   f_remote_instance_load 'my_short_id'
 #
 f_remote_instance_load() {
-  local a_id="$1"
-  local conf="data/asc/remote-instances/${a_id}.sh"
+  local p_id="$1"
+  local cache_dir='data/asc/cache/entities/remote_instance'
 
-  if [[ ! -f "$conf" ]]; then
-    echo >&2
-    echo "Error in f_remote_instance_load() - $BASH_SOURCE line $LINENO: file '$conf' not found." >&2
-    echo "-> Aborting (1)." >&2
-    echo >&2
-    return 1
+  if [[ -z "$p_id" ]]; then
+    local file=''
+    f_fs_file_list "$cache_dir" '*.sh'
+    for file in "${file_list_arr[@]}"; do
+      case "$file" in types.sh|instances.sh|_parsed.sh) continue ;; esac
+      p_id="${file%.sh}"
+      break
+    done
   fi
 
-  . "$conf"
+  f_entity_load remote_instance "$p_id"
 }
 
 ##
@@ -914,26 +925,8 @@ f_remote_instance_load() {
 #   f_remote_purge_instances
 #
 f_remote_purge_instances() {
-  local file=''
-
-  echo "Clearing generated remote instances definitions ..."
-
-  f_fs_file_list 'data/asc/remote-instances'
-
-  for file in $file_list; do
-    rm "data/asc/remote-instances/$file"
-
-    if [[ $? -ne 0 ]]; then
-      echo >&2
-      echo "Error in f_remote_purge_instances() - $BASH_SOURCE line $LINENO: failed to remove locally generated instance '$file' (in data/asc/remote-instances)." >&2
-      echo "-> Aborting (1)." >&2
-      echo >&2
-      return 1
-    fi
-  done
-
-  echo "Clearing generated remote instances definitions : done."
-  echo
+  rm -f data/asc/cache/remote_instance_ids.sh
+  f_entity_cache_purge remote_instance
 }
 
 ##
@@ -962,9 +955,10 @@ f_remote_get_instances() {
     local remote_id
     local remote_instance_ids_cache_str=''
 
-    f_fs_file_list 'data/asc/remote-instances'
+    f_fs_file_list 'data/asc/cache/entities/remote_instance'
 
-    for file in $file_list; do
+    for file in "${file_list_arr[@]}"; do
+      case "$file" in _parsed.sh) continue ;; esac
       remote_id="${file%.sh}"
       instance_ids_arr+=("$remote_id")
       remote_instance_ids_cache_str+="instance_ids_arr+=('$remote_id')
@@ -994,9 +988,9 @@ CACHE
 #   f_remote_check_id 'my_remote_id'
 #
 f_remote_check_id() {
-  local a_remote_id="$1"
+  local p_remote_id="$1"
 
-  if [[ -z "$a_remote_id" ]]; then
+  if [[ -z "$p_remote_id" ]]; then
     echo >&2
     echo "Error in f_remote_check_id() - $BASH_SOURCE line $LINENO: missing remote ID." >&2
     echo "-> Aborting (1)." >&2
@@ -1011,7 +1005,7 @@ f_remote_check_id() {
   f_remote_get_instances
 
   for instance_id in "${instance_ids_arr[@]}"; do
-    case "$a_remote_id" in "$instance_id")
+    case "$p_remote_id" in "$instance_id")
       ko=0
     esac
   done

@@ -11,6 +11,11 @@
 
 . asc/bootstrap.sh
 
+if ! type f_str_snake &>/dev/null; then
+  # shellcheck disable=SC1091
+  . asc/core/utils/str_slug.manual-inc.sh
+fi
+
 f_str_snake "$@"
 
 echo "$snake_val"

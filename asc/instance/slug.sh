@@ -11,6 +11,11 @@
 
 . asc/bootstrap.sh
 
+if ! type f_str_slug &>/dev/null; then
+  # shellcheck disable=SC1091
+  . asc/core/utils/str_slug.manual-inc.sh
+fi
+
 f_str_slug "$@"
 
 echo "$slug_val"

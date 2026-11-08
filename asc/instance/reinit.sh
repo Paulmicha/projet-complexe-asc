@@ -23,7 +23,7 @@
 #
 
 # Update 2024-06 cache results.
-. asc/asc/cache_clear.sh
+. asc/core/cache_clear.sh
 
 # Can't have read-only variables here, so we need to extract just the
 # variables we need.
@@ -64,11 +64,11 @@ if [[ -f '.env' ]]; then
   done < '.env'
 elif [[ -f 'env.yml' ]]; then
   # The file env.yml, if it exists, is the "fallback" source of truth.
-  . asc/utils/shell/shell.opt-inc.sh
-  . asc/utils/str/str.opt-inc.sh
   . asc/yml/yml.inc.sh
 
-  eval "$(f_yaml_parse 'env.yml' 'yaml_')"
+  parsed=''
+  f_yaml_parse 'env.yml' 'yaml_' 'parsed'
+  eval "$parsed"
 
   if [[ -n "$yaml_stack_version" ]]; then
     STACK_VERSION="$yaml_stack_version"

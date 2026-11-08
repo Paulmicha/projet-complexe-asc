@@ -13,7 +13,7 @@
 # Generates local Acme config file for Let's Encrypt.
 #
 # To list matches & check which one will be used (the most specific) :
-# $ a_site='my_site_id'
+# $ p_site='my_site_id'
 #   hook_ms 'dry-run' \
 #     -s 'stack' \
 #     -a 'traefik' \
@@ -53,7 +53,13 @@ f_traefik_generate_acme_conf() {
   cp "$most_specific_match" "$traefik_conf"
 
   # Replace read-only global vars (supports any global) placeholders.
+  if [[ "$(type -t f_global_list)" != function ]]; then
+    # shellcheck disable=SC1091
+    . asc/core/global.manual-inc.sh
+  fi
+
   f_global_list
+
   for var_name in "${asc_globals_var_names_arr[@]}"; do
     if grep -Fq "${token_prefix}${var_name}${token_suffix}" "$traefik_conf"; then
       var_val="${!var_name}"

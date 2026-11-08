@@ -51,6 +51,173 @@ EOF
 }
 
 ##
+# Stamp includes instance identity so a type change is a miss even if ignore
+# mtimes are unchanged.
+#
+test_asc_cache_stamp_includes_instance_identity() {
+  local stamp_a=''
+
+  f_asc_cache_stamp_compute 'stamp_a'
+
+  assertTrue 'stamp lists HOST_TYPE' "[[ \"\$stamp_a\" == *HOST_TYPE=${HOST_TYPE}* ]]"
+  assertTrue 'stamp lists INSTANCE_TYPE' "[[ \"\$stamp_a\" == *INSTANCE_TYPE=${INSTANCE_TYPE}* ]]"
+  assertTrue 'stamp lists STACK_VERSION' "[[ \"\$stamp_a\" == *STACK_VERSION=${STACK_VERSION}* ]]"
+  assertTrue 'stamp lists selected extensions-ignore path' '[[ "$stamp_a" == *extensions_ignore=* ]]'
+}
+
+##
+# Matching stamp must not rewrite primitives cache.
+#
+test_asc_primitives_cache_stamp_match_skips_extend() {
+  local before
+  local after
+
+  f_asc_primitives_cache_ensure
+  touch -d '2 seconds ago' data/asc/cache/core/active.sh
+  before=$(stat -c '%Y' data/asc/cache/core/active.sh)
+
+  f_asc_primitives_cache_ensure
+  after=$(stat -c '%Y' data/asc/cache/core/active.sh)
+
+  assertEquals 'warm stamp must not rewrite core/active.sh' "$before" "$after"
+}
+
+##
+# Ignore-file mtime change must rebuild primitives and wipe hook lookup.
+#
+test_asc_primitives_cache_ignore_touch_rebuilds_and_wipes_hooks() {
+  local before
+  local after
+
+  f_asc_primitives_cache_ensure
+  mkdir -p data/asc/cache/hook
+  echo 'dummy' > data/asc/cache/hook/nftascstmpwipe.sh
+  touch -d '2 seconds ago' data/asc/cache/core/active.sh
+  before=$(stat -c '%Y' data/asc/cache/core/active.sh)
+
+  touch .asc_extensions_ignore
+  f_asc_primitives_cache_ensure
+  after=$(stat -c '%Y' data/asc/cache/core/active.sh)
+
+  assertTrue 'ignore touch must rewrite core/active.sh' "[ '$after' -gt '$before' ]"
+  assertFalse 'stamp mismatch must wipe cache/hook lookup files' '[ -f data/asc/cache/hook/nftascstmpwipe.sh ]'
+}
+
+##
+# make cc / cache_clear wipes lookup only; next ensure recreates core cache.
+#
+test_asc_cache_clear_keeps_globals_and_rebuilds_core() {
+  assertTrue 'global.vars.sh present before cc' '[ -f data/asc/globals.sh ]'
+  assertTrue 'pivots.mk present before cc' '[ -f data/asc/pivots.mk ]'
+
+  . asc/core/cache_clear.sh
+
+  assertTrue 'cc must keep global.vars.sh' '[ -f data/asc/globals.sh ]'
+  assertTrue 'cc must keep pivots.mk' '[ -f data/asc/pivots.mk ]'
+  assertFalse 'cc must remove data/asc/cache' '[ -e data/asc/cache ]'
+
+  f_asc_primitives_cache_ensure
+
+  assertTrue 'next ensure writes core/active.sh' '[ -f data/asc/cache/core/active.sh ]'
+  assertTrue 'next ensure writes core/stamp' '[ -f data/asc/cache/core/stamp ]'
+}
+
+##
+# yml.inc.sh has one home: ASC_INC (active dir `yml`). Not the kernel block.
+# @see changelog/2026/09/19-lazy-opt-inc-remaining-core-waves.md
+#
+test_asc_yml_inc_not_in_kernel_includes() {
+  local kernel
+  kernel="$(sed -n '/Include ASC core utilities/,/ASC_BS_SKIP_GLOBALS/p' asc/bootstrap.sh)"
+  assertFalse 'kernel block must not source yml.inc.sh' \
+    "printf '%s' \"$kernel\" | grep -q 'yml/yml.inc.sh'"
+}
+
+##
+# Kernel utils hub is `asc/core/utils.manual-inc.sh` (not `asc/utils/core_utils.inc.sh`).
+#
+test_asc_utils_inc_is_kernel_include() {
+  local kernel
+  kernel="$(sed -n '/Include ASC core utilities/,/ASC_BS_SKIP_GLOBALS/p' asc/bootstrap.sh)"
+  assertTrue 'kernel block sources asc/core/utils.manual-inc.sh' \
+    "printf '%s' \"$kernel\" | grep -q 'asc/core/utils.manual-inc.sh'"
+  assertFalse 'old core_utils.inc.sh path must not remain in kernel block' \
+    "printf '%s' \"$kernel\" | grep -q 'core_utils'"
+}
+
+##
+# Kernel `core.manual-inc.sh`: bootstrap sources it. Discovery must not list
+# it on `ASC_INC` (the eager name-match was leftover from `asc/asc` → `asc/core`).
+#
+test_asc_core_manual_inc_is_kernel_not_on_asc_inc() {
+  local kernel
+  local inc
+  kernel="$(sed -n '/Include ASC core utilities/,/ASC_BS_SKIP_GLOBALS/p' asc/bootstrap.sh)"
+  assertTrue 'kernel block sources asc/core/core.manual-inc.sh' \
+    "printf '%s' \"$kernel\" | grep -q 'asc/core/core.manual-inc.sh'"
+  assertTrue 'core.manual-inc.sh exists' \
+    '[ -f asc/core/core.manual-inc.sh ]'
+  assertFalse 'old core.inc.sh path must not remain' \
+    '[ -f asc/core/core.inc.sh ]'
+  inc="$(bash -c '. asc/bootstrap.sh; printf %s "$ASC_INC"')"
+  assertFalse 'ASC_INC must not list core.inc.sh' \
+    "printf '%s' \"$inc\" | grep -q 'asc/core/core.inc.sh'"
+  assertFalse 'ASC_INC must not list core.manual-inc.sh' \
+    "printf '%s' \"$inc\" | grep -q 'core.manual-inc.sh'"
+}
+
+##
+# Wave B emptied kernel `global.inc.sh`; the stub was deleted. Helpers live in
+# `asc/core/global.manual-inc.sh` (callers source it).
+#
+test_asc_global_inc_not_in_kernel_includes() {
+  local kernel
+  kernel="$(sed -n '/Include ASC core utilities/,/ASC_BS_SKIP_GLOBALS/p' asc/bootstrap.sh)"
+  assertFalse 'kernel block must not source global.inc.sh' \
+    "printf '%s' \"$kernel\" | grep -q 'global.inc.sh'"
+}
+
+##
+# After bootstrap, yaml helpers still exist (ASC_INC active-dir name match).
+#
+test_asc_yml_inc_on_asc_inc_defines_parse() {
+  assertTrue 'ASC_INC lists yml.inc.sh' \
+    "[[ \" \$ASC_INC \" == *'asc/yml/yml.inc.sh'* ]]"
+  assertEquals 'f_yaml_parse is defined' 'function' "$(type -t f_yaml_parse)"
+}
+
+##
+# Empty `test.inc.sh` was deleted (same as kernel `global.inc.sh`). Helpers live
+# in `asc/test/test.opt-inc.sh` with explicit `.`. `test` is not on ASC_INC.
+#
+test_asc_test_inc_not_on_asc_inc() {
+  assertFalse 'empty test.inc.sh must not exist' '[ -f asc/test/test.inc.sh ]'
+  local inc
+  inc="$(bash -c '. asc/bootstrap.sh; printf %s "$ASC_INC"')"
+  assertFalse 'ASC_INC must not list test.inc.sh' \
+    "printf '%s' \"$inc\" | grep -q 'asc/test/test.inc.sh'"
+}
+
+##
+# Wave C: git helpers are not eager. Bare bootstrap must not define them.
+# Direct callers source asc/git/git.opt-inc.sh.
+#
+test_git_helpers_absent_from_bare_bootstrap() {
+  local inc
+  local kind
+
+  assertFalse 'git.inc.sh must not remain' '[ -f asc/git/git.inc.sh ]'
+  assertTrue 'git.opt-inc.sh holds the helpers' '[ -f asc/git/git.opt-inc.sh ]'
+  inc="$(bash -c '. asc/bootstrap.sh; printf %s "$ASC_INC"')"
+  assertFalse 'ASC_INC must not list git.inc.sh' \
+    "printf '%s' \"$inc\" | grep -q 'asc/git/git.inc.sh'"
+  kind="$(bash -c '. asc/bootstrap.sh; type -t giw || true')"
+  assertNotEquals 'giw must be absent from a bare bootstrap' 'function' "$kind"
+  kind="$(bash -c '. asc/bootstrap.sh; . asc/git/git.opt-inc.sh; type -t f_git_wrapper || true')"
+  assertEquals 'explicit source defines f_git_wrapper' 'function' "$kind"
+}
+
+##
 # Cleans up any leftovers from previous tests.
 #
 # (Internal shunit2 function called after all tests have run.)

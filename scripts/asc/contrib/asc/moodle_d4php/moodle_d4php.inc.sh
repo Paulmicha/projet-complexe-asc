@@ -88,6 +88,10 @@ f_moodle_write_settings() {
   fi
 
   # Start with read-only global vars (supports any global).
+  if [[ "$(type -t f_global_list)" != function ]]; then
+    # shellcheck disable=SC1091
+    . asc/core/global.manual-inc.sh
+  fi
   f_global_list
   for var_name in "${asc_globals_var_names_arr[@]}"; do
     if grep -Fq "${token_prefix}${var_name}${token_suffix}" "$MOODLE_CONFIG_FILE"; then
@@ -106,7 +110,7 @@ f_moodle_write_settings() {
       esac
 
       sed -e "s,${token_prefix}${var_name}${token_suffix},${var_val},g" -i "$MOODLE_CONFIG_FILE"
-      # echo "  [$a_site] replaced '${token_prefix}${var_name}${token_suffix}' by '${var_val}'"
+      # echo "  [$p_site] replaced '${token_prefix}${var_name}${token_suffix}' by '${var_val}'"
     fi
   done
 
@@ -142,7 +146,7 @@ f_moodle_write_settings() {
   for var_name in $db_vars; do
     if grep -Fq "${token_prefix}${var_name}${token_suffix}" "$MOODLE_CONFIG_FILE"; then
       sed -e "s,${token_prefix}${var_name}${token_suffix},${!var_name},g" -i "$MOODLE_CONFIG_FILE"
-      # echo "  [$a_site] replaced '${token_prefix}${var_name}${token_suffix}' by '${!var_name}'"
+      # echo "  [$p_site] replaced '${token_prefix}${var_name}${token_suffix}' by '${!var_name}'"
     fi
   done
 
