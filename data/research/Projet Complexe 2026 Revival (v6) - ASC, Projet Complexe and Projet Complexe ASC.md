@@ -680,6 +680,14 @@ The reviewer is a different model family from the writer, in the agent-plan desi
 
 `unknown` is never coerced to `yes`. A decision-model hook may later sit in front of messy text. It is deferred. The deterministic merge is the default, which is also why Ollaya is optional and off.
 
+## 9.3a Addendum 2026-11-17 — a tracer can improve its harness
+
+[Seong et al., *The Last Harness You’ll Ever Build*, arXiv v3 (2026)](https://arxiv.org/html/2604.21003) proposes an inner loop of task execution, independent evaluation and harness revision, and an outer loop that revises the improvement process across tasks. The paper presents a framework and an evaluation protocol, not empirical results; it explicitly defers those. Its claims of rapid convergence and eliminating human harness engineering are not established here.
+
+**Proposed application:** after one read-only research tracer exists, compare its baseline with one bounded retrieval or packing change using known source passages and separate held-out cases. Check evidence and citation support, injection resistance and task outcomes, with exact checks where possible and human review where needed. Record versions and run conditions, per-case results, time and cost, the proposed diff and the human keep/reject decision. Repeat when variability warrants it. A worker may suggest a skill change; a human owns edits and promotion (§10.3). A model evaluator is not ground truth, and missing evidence stays unknown.
+
+Start with a small redacted local experiment note; the stage-1 thread record and the later short trace in §12.5 remain distinct. The larger shelf ledger is a possible later design, not a prerequisite or an implemented feature. Keep candidate writes, evaluation criteria, held-out material and security policy separated; use only verified isolation. The unattended-run restriction in §13.3 remains. Meta-evolution is a later research question, conditional on stable tasks, reliable evaluation and evidence that a simpler round is useful. Nothing in this addendum implements or validates the loop.
+
 ## 9.4 What the reviews add, without becoming the format
 
 The agentic shelves want more plan machinery than ASC should grow in one step: a spec template with stories and acceptance checks, a `hitl_gate` before execute, modes `draft | pair | validate`, a generated forty-line `AGENTS.md` per Task, Vaughan’s four files (`PLAN`, `PROGRESS`, `DISCOVERIES`, `DECISIONS`), a `write_approval` file with a timeout and a default of refuse. Some of those contradict each other (a timeout that refuses, beside a rule that HITL cannot fail closed by auto-accept). They are a menu.
