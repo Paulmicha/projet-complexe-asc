@@ -97,6 +97,7 @@ esac
 # Consolidated synchronizing of entire folders.
 dirs_swapped=()
 dirs_swapped+=('asc')
+dirs_swapped+=('docs/specs/asc')
 dirs_swapped+=('scripts/asc/contrib/asc')
 dirs_swapped+=('.agents/skills/asc-actions-priority')
 dirs_swapped+=('.agents/skills/asc-author-code')
@@ -104,6 +105,7 @@ dirs_swapped+=('.agents/skills/asc-author-docs')
 dirs_swapped+=('.agents/skills/asc-mother-guard')
 
 # Ensure the parent folders of every path that needs replacing already exists.
+mkdir -p 'docs/specs/asc'
 mkdir -p 'scripts/asc/contrib'
 mkdir -p '.agents/skills'
 
@@ -146,7 +148,7 @@ if [[ $? -ne 0 || ! -f 'AGENTS.asc.md' ]]; then
 fi
 
 # For newly created project instances, we need an initial AGENTS.md.
-if [[ -n 'AGENTS.md' ]]; then
+if [[ ! -f 'AGENTS.md' ]]; then
   cp "$tmp_dir/AGENTS.md" 'AGENTS.md'
 fi
 

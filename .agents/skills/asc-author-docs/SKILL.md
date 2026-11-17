@@ -11,6 +11,12 @@ owns ASC concepts and scope; report material inconsistencies instead of silently
 redefining concepts in another document. Label proposed behavior as proposed and
 verify paths before describing them as existing implementations.
 
+For ASC project documentation conventions, read and follow the local
+[documentation specification](../../../docs/specs/asc/documentation.md).
+It defines document homes, lifecycle status, and authority across ASC projects;
+apply it without assuming that an instance has already migrated its existing
+files. If the specification is unavailable, report that limitation.
+
 ## README proposals
 
 Preserve human-written README text. Unless the user explicitly authorizes a

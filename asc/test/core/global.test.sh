@@ -13,7 +13,7 @@
 # - nftascgevdehnc = name for testing ASC global env vars dummy extension hopefully not colliding
 #
 # TODO test the different globals keys.
-# @see global() in asc/utilities/global.sh
+# @see global() in asc/core/global.manual-inc.sh
 #
 # @example
 #   asc/test/asc/global.test.sh
@@ -246,7 +246,7 @@ test_globals_debug_script_without_prior_aggregation() {
 ##
 # Init-only global helpers must not load from kernel bootstrap. Callers source
 # `asc/core/global.manual-inc.sh`. There is no kernel `global.inc.sh`.
-# @see changelog/2026/09/19-lazy-opt-inc-remaining-core-waves.md
+# @see docs/plans/2026/09/19-lazy-opt-inc-remaining-core-waves.md
 #
 test_f_global_aggregate_helpers_absent_from_kernel_bootstrap() {
   local out
@@ -268,6 +268,27 @@ printf " %s" "$(type -t f_global_assign_value)"
 printf " %s" "$(type -t global)"')"
   assertEquals 'init-only global helpers exist after opt-inc' \
     'function function function function function' "$out"
+}
+
+##
+# Core append declarations must be applied once, including on a repeated init.
+#
+test_instance_init_aggregates_core_appends_once() {
+  local output status iteration
+
+  for iteration in 1 2; do
+    output="$(env -i HOME="$HOME" PATH="$PATH" USER="$USER" \
+      ASC_GIT_HOOKS_WIRED='pre-commit pre-commit' \
+      bash asc/instance/init.sh -y -r 2>&1)"
+    status=$?
+    assertEquals "dry-run init $iteration succeeds" 0 "$status"
+    assertTrue "init $iteration contains one pre-commit hook" \
+      "[[ \"\$output\" == *\$'ASC_GIT_HOOKS_WIRED = pre-commit\\n'* ]]"
+    assertEquals "init $iteration has one core synonym" 1 \
+      "$(printf '%s\n' "$output" | sed -n '/^ASC_SYNONYMS = /p' | grep -o 'core-cache-clear/cc' | wc -l)"
+    assertTrue "init $iteration retains extension synonyms" \
+      "[[ \"\$output\" == *'anti-pattern/code-smell'* ]]"
+  done
 }
 
 ##
