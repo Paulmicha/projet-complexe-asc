@@ -543,6 +543,8 @@ At least one vendor has an open report that the id printed on a resumed run diff
 
 `codex exec --ephemeral` and `claude -p --no-session-persistence` write no session. They are the right shape for a one-shot review turn.
 
+**Privacy check for a one-shot turn.** Verify session persistence and background memory separately for the selected provider and profile before sending sensitive material. The July source study describes Codex extracting memories from saved rollouts and consolidating them into separate local artifacts. Treat those artifacts as private provider state under §13.4. [Barbaste et al., §9.6](https://arxiv.org/html/2609.00006v1#S9.SS6)
+
 ## 8.2 What a headless turn returns (external, not exercised)
 
 The three CLIs differ in every flag and agree on the shape: a prompt in, an id and a final text out.
@@ -603,6 +605,16 @@ OpenTelemetry GenAI names (`gen_ai.conversation.id`, `gen_ai.provider.name`, `ge
 
 Claude Code stays deferred until it is installed.
 
+## 8.4 Addendum 2026-11-18 — AG-UI for a client-facing run view
+
+AG-UI 1.0 is a candidate vocabulary for the agent-facing part of the [proposed Tauri adapter](../ideas/2026/08/14-proposed-architecture.md). Its typed events cover conversation, tool progress, activity and run outcomes. The desktop checkout inspected for this review registers a placeholder native command. The first useful comparison is one real ASC run shown over a native Tauri channel, with and without an AG-UI-shaped projection. Consider interoperability once another client or worker can use that projection. [AG-UI architecture](https://docs.ag-ui.com/spec/1.0/architecture) · [Audited upstream revision](https://github.com/ag-ui-protocol/ag-ui/commit/3416b86da4b3288e87f827c7f2759a7fa18b5231)
+
+- **Identity and completion.** Keep ASC's `run_id`, any provider session pointer, and AG-UI's `threadId` and `runId` distinct. AG-UI can report success, interruption, cancellation or error. A dropped stream leaves the UI with an unknown outcome until it queries the ASC record. The standard SSE binding cannot resume a broken response. In a fixture check, the TypeScript client 1.0.5 resolved its promise after a bare EOF following `RUN_STARTED`, with no terminal event. Stop still requires confirmation from the host supervisor. [Run lifecycle](https://docs.ag-ui.com/spec/1.0/events/lifecycle) · [HTTP and SSE](https://docs.ag-ui.com/spec/1.0/basic/transports/http-sse)
+- **Approval.** An interrupted thread can start a new AG-UI run carrying answers to the interruption. If used for an ASC decision, the host checks the authorised actor, Task or named step, exact plan or proposal revision, expiry and prior disposition. Persist the decision through the same authorised action the terminal uses. A resumed answer is an input to that action. [Interrupts and resume](https://docs.ag-ui.com/spec/1.0/basic/patterns/interrupt-resume)
+- **Shared view.** Project a small, redacted state value from the host. Refresh it from an authoritative snapshot after a gap or failed patch. Keep evidence and records behind their existing read paths. The first view can show a bounded activity and cite a local evidence reference. [Snapshots and deltas](https://docs.ag-ui.com/spec/1.0/basic/patterns/snapshots)
+
+Trial acceptance is terminal/GUI parity for one run, correct display of a dropped stream and a host-confirmed stop, and rejection of a duplicated or stale decision against a revised plan. Use the existing result and status surfaces for the trial. The local IPC approach needs no agent HTTP listener.
+
 ---
 
 # 9. Plans, evidence, and authorisation
@@ -648,7 +660,7 @@ Isolation, two modes, both logged:
 
 | Mode | Meaning |
 |---|---|
-| `enforced` | Each turn in a `bwrap` profile. The reviewer cannot write the project or the staging copy. `bwrap` is installed on this host. |
+| `enforced` | Each turn uses its verified `bwrap` profile (§13.3). The reviewer cannot write the project or the staging copy. |
 | `weakened` | No sandbox. A before/after inventory of sha256 and size of every regular file detects writes. |
 
 Outcomes: fixable blocking findings go back to the writer (an unchanged digest is `stalled_draft`); missing evidence or `unknown` pauses as `needs_human_review`; optional suggestions stop the loop; `yes` with matching digests is success for *considering* the step; a crash is `missing_result_json`. Other abort tokens: `missing_draft`, `write_boundary`, `reviewer_write`, `inventory_error`, `max_rounds`.
@@ -881,7 +893,7 @@ Window dumps (`windows/$task/$call.window.yml`, written by `pre_llm` after redac
 
 The memory shelves’ Postgres sketch — Claims with polarity and bi-temporal bounds, Gaps with `for_decision`, `tried[]`, and a budget, an approval log the worker may only insert as `proposed` — is still the interpretive model. It is not the run model. Export to Markdown and a portable provenance vocabulary (PROV-O names, without the RDF stack) remains the escape hatch: if the store cannot be exported, it has become identity. `pc forget` is a real verb in those reviews and has no implementation. It should be remembered when the first Claim store is chosen, because a store without deletion becomes the archive Monnin calls a zombie.
 
-Episodic recall stays FTS over raw traces, hits fenced out of the prompt so a retrieved log line cannot instruct the model. That is v5, and the transcript survey reinforces it: a Cursor line is not even a reliable event.
+Episodic recall uses full-text search over approved ASC trace fields, such as labels, source references and decisions. Provider transcript bodies and prompt-window contents are outside the index. Pass any retrieved fields as untrusted data. This follows the data-store trace review's field restrictions. Hermes's session search illustrates the use of lexical search for recall over its own session history. [Barbaste et al., §§9.6 and 13.2](https://arxiv.org/html/2609.00006v1#S9.SS6)
 
 ---
 
@@ -924,7 +936,9 @@ User units cannot order themselves after `docker.service` or `network-online.tar
 
 ## 13.3 Sandbox and secrets (proposed, with one observed fact)
 
-`bwrap` is installed. The agent-plan’s `enforced` mode can use it. The reviews add Landlock and seccomp, `deny_read` on SSH, GPG, SOPS, and `.env-local*`, and systemd hardening `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectSystem=strict`. `ProtectHome=` is unusable if the job must read the project. Secrets: `systemd-creds` for units; provider keys stay in the host wrap and are passed per call; no secret in the environment of a long-lived process. Unattended agent runs stay forbidden.
+`bwrap` was installed at the time of the host survey. For the proposed `enforced` mode, specify permitted reads, writes and network access for each writer and reviewer profile. Test those boundaries through the actual worker with harmless fixtures for SSH, GPG, SOPS and local environment files, along with a positive check that legitimate inputs remain readable. The tagged Codex Linux implementation uses Bubblewrap followed by seccomp on its Bubblewrap path and selects Landlock on a separate legacy path. ASC's worker profile needs its own verification. [Codex `rust-v0.144.1` sandbox source](https://github.com/openai/codex/blob/rust-v0.144.1/codex-rs/linux-sandbox/src/linux_run_main.rs#L196-L235)
+
+Proposed systemd hardening uses `NoNewPrivileges=yes`, `PrivateTmp=yes` and `ProtectSystem=strict`. Configure any `ProtectHome=` setting to allow access to the required project files. Use `systemd-creds` for units. Keep provider keys in the host wrapper and pass them per call. Keep secrets out of long-lived process environments. Unattended agent runs stay forbidden.
 
 A Docker socket in a worker container is refused, including a read-only mount. Git worktrees isolate files. They do not isolate ports, container names, or volumes. One coding worker per Task remains v5’s rule.
 
@@ -1133,6 +1147,10 @@ Code checked again while writing this note: `asc/thread/thread.inc.sh` (`f_threa
 Review shelves mined that day, and not re-read line by line for this note: the agentic sequence (harness, packing, routing, specs, memory), the data-store sequence (formats, traces, integrity), the devops sequence (places, systemd, journal, LAN box, sandbox). Tags in those mines were decision / proposal / external. This note keeps that distinction. Where two shelves contradict, §12.5 and §7 say so instead of picking silently.
 
 External pages read that day, behaviour not re-run here: `systemd-run(1)` and the user-instance remote limitation; `pueue`’s README; a job-queue comparison published by a vendor of one of the queues; herdr’s command reference; Ollaya’s CLI reference; the Agent Skills format; OpenTelemetry GenAI semantic conventions (development status).
+
+Added 2026-11-18. Barbaste et al. compare pinned coding-harness source snapshots and discuss separate write paths for sessions and memory, lexical code search, and layered worker permissions. Their July corpus includes OpenClaw as a contrast, and the Claude Code analysis uses a circulated March snapshot. The study supplies architecture examples. Its comparisons provide no matched runtime benchmark for this project. [*Harness Engineering*, arXiv:2609.00006v1](https://arxiv.org/abs/2609.00006v1)
+
+AG-UI review, 2026-11-18. Read the frozen 1.0 specification, the schema and the TypeScript reference paths at upstream revision `3416b86`. All 219 valid and invalid source examples matched their expected schema verdicts. Seven isolated checks used the published TypeScript client 1.0.5 with synthetic SSE responses. They covered state patches, terminal boundaries, approval-answer validation, connection behavior and cancellation events. ASC, Tauri and a live worker were outside that test setup. [AG-UI 1.0 schema and fixtures](https://github.com/ag-ui-protocol/ag-ui/tree/3416b86da4b3288e87f827c7f2759a7fa18b5231/spec/1.0)
 
 Not done, and still true:
 
